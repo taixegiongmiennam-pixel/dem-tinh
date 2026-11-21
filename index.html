@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Đếm Tinh</title>
+<meta name="description" content="Đếm cọng tinh trong cốc bằng camera, chạy ngay trên điện thoại">
+<meta name="theme-color" content="#16502e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Đếm Tinh">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+:root{
+  --bg:#f4f6f3; --card:#ffffff; --ink:#18221b; --muted:#5d6b61; --line:#dde3dc;
+  --brand:#16502e; --brand-2:#1f7a45; --ok:#1fae55; --warn:#f08a00; --bad:#d23b3b; --add:#1e78ff;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f1511; --card:#18211b; --ink:#e8efe9; --muted:#9db0a2; --line:#2a362e;
+  --brand:#2f9a5a; --brand-2:#3bb56c;
+}}
+:root[data-theme="dark"]{ --bg:#0f1511; --card:#18211b; --ink:#e8efe9; --muted:#9db0a2; --line:#2a362e; --brand:#2f9a5a; --brand-2:#3bb56c; }
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--brand);color:#fff;padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;display:flex;align-items:center;gap:10px}
+header h1{font-size:19px;margin:0;flex:1;letter-spacing:.2px}
+header button{background:rgba(255,255,255,.15);color:#fff;border:0;border-radius:10px;padding:7px 11px;font-size:14px}
+main{max-width:720px;margin:0 auto;padding:14px 16px 120px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+.big-btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:600;background:var(--brand-2);color:#fff;margin-bottom:10px}
+.big-btn.secondary{background:transparent;color:var(--brand-2);border:2px solid var(--brand-2)}
+.big-btn svg{width:24px;height:24px}
+.tips{color:var(--muted);font-size:14px;margin:6px 0 0;padding-left:18px}
+.tips li{margin:3px 0}
+.hidden{display:none!important}
+#status{font-size:13px;color:var(--muted);text-align:center;margin:6px 0}
+/* kết quả */
+.count-row{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.count{font-size:56px;font-weight:800;line-height:1;color:var(--brand-2)}
+.count small{font-size:16px;font-weight:600;color:var(--muted);margin-left:6px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-size:13px;padding:4px 9px;border-radius:999px;background:var(--bg);border:1px solid var(--line)}
+.chip b{font-weight:700}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
+#viewport{position:relative;overflow:auto;border-radius:12px;background:#000;max-height:62vh;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
+#cv{display:block;width:100%;height:auto;touch-action:manipulation}
+.toolbar{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}
+.toolbar button,.row button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:10px 4px;font-size:14px;font-weight:600}
+.toolbar button.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.row{display:flex;gap:8px;align-items:center;margin:8px 0}
+.row label{font-size:14px;color:var(--muted);white-space:nowrap}
+.row input[type=range]{flex:1}
+.row input[type=text]{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px;background:var(--bg);color:var(--ink)}
+.primary{background:var(--brand-2)!important;color:#fff!important;border-color:var(--brand-2)!important}
+.hint{font-size:13px;color:var(--muted);margin:4px 0 0}
+/* soát chỗ cần xem */
+#review{position:fixed;inset:auto 0 0 0;z-index:10;background:var(--card);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom));box-shadow:0 -8px 24px rgba(0,0,0,.18)}
+#review .inner{max-width:720px;margin:0 auto;display:flex;gap:12px;align-items:center}
+#rvCanvas{width:120px;height:120px;border-radius:10px;background:#000;flex:none}
+#review .btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1}
+#review .btns button{padding:12px 4px;border-radius:10px;border:0;font-weight:700;font-size:15px}
+#rvYes{background:var(--ok);color:#fff} #rvNo{background:var(--bad);color:#fff}
+#rvSkip,#rvClose{background:var(--bg);color:var(--ink);border:1px solid var(--line)!important}
+/* lịch sử */
+.hist-item{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.hist-item:last-child{border-bottom:0}
+.hist-item img{width:56px;height:56px;object-fit:cover;border-radius:8px;flex:none;background:#000}
+.hist-item .meta{flex:1;min-width:0}
+.hist-item .meta b{font-size:20px}
+.hist-item .meta div{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-item button{border:0;background:transparent;color:var(--bad);font-size:13px;padding:6px}
+#busy{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;color:#fff;font-size:17px;text-align:center;padding:20px}
+.spinner{width:42px;height:42px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp 1s linear infinite;margin:0 auto 12px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Đếm Tinh</h1>
+  <button id="btnHistory" type="button">Lịch sử</button>
+</header>
+
+<main>
+  <!-- MÀN HÌNH ĐẦU -->
+  <section id="home">
+    <div class="card">
+      <button class="big-btn" id="btnCamera" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="4"/></svg>
+        Chụp ảnh cốc
+      </button>
+      <button class="big-btn secondary" id="btnPick" type="button">Chọn ảnh có sẵn</button>
+      <input id="fileCam" type="file" accept="image/*" capture="environment" class="hidden">
+      <input id="filePick" type="file" accept="image/*" class="hidden">
+      <label class="row" style="margin-top:4px"><input type="checkbox" id="chkFine"> <span style="font-size:14px">Đếm kỹ (cốc rất nhiều cọng, chậm hơn)</span></label>
+      <div id="status">Đang tải mô hình…</div>
+    </div>
+    <div class="card">
+      <b>Cách chụp để đếm đúng</b>
+      <ul class="tips">
+        <li>Chụp <b>thẳng từ trên xuống</b> miệng cốc, không chụp nghiêng.</li>
+        <li>Cả miệng cốc nằm gọn trong khung, chiếm khoảng 2/3 ảnh.</li>
+        <li>Đủ sáng, không lóa đèn. Chờ hết sương nitơ hoặc lau sương trước khi chụp.</li>
+        <li>Phải <b>thấy đầu từng cọng</b>: cọng bị che khuất máy không đếm được.</li>
+        <li>Sau khi đếm: soát các chấm <b style="color:var(--warn)">màu cam</b> là xong.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- MÀN HÌNH KẾT QUẢ -->
+  <section id="result" class="hidden">
+    <div class="card">
+      <div class="count-row">
+        <div class="count"><span id="nTotal">0</span><small>cọng</small></div>
+        <div class="chips">
+          <span class="chip"><span class="dot" style="background:var(--ok)"></span>Chắc chắn <b id="nSure">0</b></span>
+          <span class="chip"><span class="dot" style="background:var(--warn)"></span>Cần xem <b id="nUnsure">0</b></span>
+          <span class="chip"><span class="dot" style="background:var(--add)"></span>Tự thêm <b id="nAdded">0</b></span>
+        </div>
+      </div>
+      <p class="hint" id="timeInfo"></p>
+    </div>
+
+    <div id="viewport"><canvas id="cv"></canvas></div>
+
+    <div class="toolbar">
+      <button type="button" data-mode="view" class="on">Xem</button>
+      <button type="button" data-mode="add">+ Thêm</button>
+      <button type="button" data-mode="del">− Bớt</button>
+      <button type="button" data-mode="roi">Vùng cốc</button>
+    </div>
+    <p class="hint" id="modeHint">Chạm "Soát chỗ cần xem" để kiểm từng chấm cam.</p>
+
+    <div class="card">
+      <div class="row">
+        <button type="button" id="btnReview" class="primary" style="flex:1">Soát chỗ cần xem</button>
+        <button type="button" id="zoomOut" style="width:46px">−</button>
+        <button type="button" id="zoomIn" style="width:46px">+</button>
+      </div>
+      <div class="row"><label for="rgConf">Lỏng</label><input type="range" id="rgConf" min="0.10" max="0.70" step="0.01"><label>Chặt</label></div>
+      <div class="row" id="roiRow"><label for="rgRoi">Vùng cốc</label><input type="range" id="rgRoi" min="0.2" max="1.6" step="0.01" value="1"><button type="button" id="btnRoiOff" style="padding:8px 10px">Tắt</button></div>
+      <div class="row"><input type="text" id="txtLabel" placeholder="Ghi chú: tên giống, số cốc, bình…"></div>
+      <div class="row">
+        <button type="button" id="btnSave" class="primary" style="flex:1">Lưu kết quả</button>
+        <button type="button" id="btnNew" style="flex:1">Đếm cốc khác</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- LỊCH SỬ -->
+  <section id="history" class="hidden">
+    <div class="card">
+      <div class="row" style="margin-top:0">
+        <b style="flex:1">Lịch sử đếm</b>
+        <button type="button" id="btnCsv">Xuất CSV</button>
+        <button type="button" id="btnBack">Quay lại</button>
+      </div>
+      <div id="histList"></div>
+    </div>
+  </section>
+</main>
+
+<div id="review" class="hidden">
+  <div class="inner">
+    <canvas id="rvCanvas" width="240" height="240"></canvas>
+    <div style="flex:1">
+      <div style="font-size:14px;margin-bottom:6px">Chỗ này có phải <b>1 cọng</b>? <span id="rvPos" style="color:var(--muted)"></span></div>
+      <div class="btns">
+        <button type="button" id="rvYes">Đúng</button>
+        <button type="button" id="rvNo">Không phải</button>
+        <button type="button" id="rvSkip">Bỏ qua</button>
+        <button type="button" id="rvClose">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="busy" class="hidden"><div><div class="spinner"></div><div id="busyText">Đang đếm…</div></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.wasm.min.js"></script>
+<script>
+'use strict';
+/* ====== CẤU HÌNH (cập nhật sau khi đào tạo) ====== */
+const CONFIG = {
+  model: 'model/best.onnx',   // được chia nhỏ thành best.onnx.part0, part1… (xem modelParts)
+  modelParts: 3,
+  ortCdn: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/',
+  size: 960,            // cỡ ảnh vào mô hình
+  conf: 0.35,           // ngưỡng mặc định (chọn theo sai số đếm trên tập kiểm tra)
+  unsureBand: 0.20,     // điểm trong [conf, conf+band) -> tô cam "cần xem"
+  iou: 0.5,
+  minConf: 0.10,        // giữ mọi khung >= mức này để kéo thanh Lỏng–Chặt không cần chạy lại
+  maxSide: 3000         // thu nhỏ ảnh quá lớn cho đỡ tốn bộ nhớ
+};
+
+/* ====== TIỆN ÍCH ====== */
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
+};
+function show(id){ for(const s of ['home','result','history']) $(s).classList.toggle('hidden', s !== id); window.scrollTo(0,0); }
+function busy(on, text){ $('busy').classList.toggle('hidden', !on); if(text) $('busyText').textContent = text; }
+
+/* ====== MÔ HÌNH ====== */
+let session = null;
+async function loadModel(){
+  try{
+    if(typeof ort === 'undefined') throw new Error('chưa tải được thư viện, hãy mở app khi có mạng lần đầu');
+    ort.env.wasm.wasmPaths = CONFIG.ortCdn;
+    ort.env.wasm.numThreads = (self.crossOriginIsolated && navigator.hardwareConcurrency > 1) ? Math.min(4, navigator.hardwareConcurrency) : 1;
+    let src = CONFIG.model;
+    if(CONFIG.modelParts > 0){
+      const bufs = [];
+      for(let i = 0; i < CONFIG.modelParts; i++){
+        $('status').textContent = `Đang tải mô hình… ${i + 1}/${CONFIG.modelParts}`;
+        const r = await fetch(`${CONFIG.model}.part${i}`); if(!r.ok) throw new Error('thiếu tệp mô hình phần ' + i);
+        bufs.push(new Uint8Array(await r.arrayBuffer()));
+      }
+      src = new Uint8Array(bufs.reduce((n, b) => n + b.length, 0)); let o = 0; for(const b of bufs){ src.set(b, o); o += b.length; }
+    }
+    session = await ort.InferenceSession.create(src, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+    $('status').textContent = 'Sẵn sàng. Ảnh được xử lý ngay trên máy, không gửi đi đâu.';
+  }catch(e){
+    console.error(e);
+    $('status').textContent = 'Chưa tải được mô hình: ' + (e.message || e);
+  }
+}
+
+function letterbox(src, sx, sy, sw, sh){
+  const S = CONFIG.size, r = Math.min(S / sw, S / sh);
+  const nw = Math.round(sw * r), nh = Math.round(sh * r);
+  const px = Math.floor((S - nw) / 2), py = Math.floor((S - nh) / 2);
+  const c = document.createElement('canvas'); c.width = S; c.height = S;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.fillStyle = 'rgb(114,114,114)'; g.fillRect(0, 0, S, S);
+  g.drawImage(src, sx, sy, sw, sh, px, py, nw, nh);
+  const d = g.getImageData(0, 0, S, S).data, n = S * S;
+  const t = new Float32Array(3 * n);
+  for(let i = 0, j = 0; i < n; i++, j += 4){ t[i] = d[j] / 255; t[n + i] = d[j+1] / 255; t[2*n + i] = d[j+2] / 255; }
+  return { tensor: new ort.Tensor('float32', t, [1, 3, S, S]), r, px, py };
+}
+
+async function detect(src, sx, sy, sw, sh){
+  const lb = letterbox(src, sx, sy, sw, sh);
+  const out = await session.run({ [session.inputNames[0]]: lb.tensor });
+  const o = out[session.outputNames[0]];
+  const [, C, N] = o.dims, a = o.data, res = [];
+  for(let i = 0; i < N; i++){
+    let s = 0; for(let k = 4; k < C; k++) s = Math.max(s, a[k*N + i]);
+    if(s < CONFIG.minConf) continue;
+    const cx = (a[i] - lb.px) / lb.r, cy = (a[N + i] - lb.py) / lb.r;
+    const w = a[2*N + i] / lb.r, h = a[3*N + i] / lb.r;
+    res.push({ x: sx + cx, y: sy + cy, w, h, s });
+  }
+  return res;
+}
+
+function iou(a, b){
+  const x1 = Math.max(a.x - a.w/2, b.x - b.w/2), y1 = Math.max(a.y - a.h/2, b.y - b.h/2);
+  const x2 = Math.min(a.x + a.w/2, b.x + b.w/2), y2 = Math.min(a.y + a.h/2, b.y + b.h/2);
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  return inter / (a.w*a.h + b.w*b.h - inter + 1e-9);
+}
+function nms(boxes, thr){
+  boxes.sort((p, q) => q.s - p.s);
+  // lưới để chạy nhanh khi có hàng nghìn khung
+  const keep = [], cell = 64, grid = new Map();
+  const key = (gx, gy) => gx + ',' + gy;
+  for(const b of boxes){
+    const gx = Math.floor(b.x / cell), gy = Math.floor(b.y / cell);
+    let ok = true;
+    outer: for(let dx = -1; dx <= 1; dx++) for(let dy = -1; dy <= 1; dy++){
+      const L = grid.get(key(gx+dx, gy+dy)); if(!L) continue;
+      for(const k of L) if(iou(b, k) > thr){ ok = false; break outer; }
+    }
+    if(ok){ keep.push(b); const kk = key(gx, gy); if(!grid.has(kk)) grid.set(kk, []); grid.get(kk).push(b); }
+  }
+  return keep;
+}
+
+async function runAll(img, fine){
+  const W = img.width, H = img.height;
+  let all = await detect(img, 0, 0, W, H);
+  if(fine){
+    const tw = Math.ceil(W * 0.6), th = Math.ceil(H * 0.6);
+    const xs = [0, W - tw], ys = [0, H - th];
+    for(const x0 of xs) for(const y0 of ys){
+      let part = await detect(img, x0, y0, tw, th);
+      const m = 3; // bỏ khung chạm mép trong của ô cắt (cọng bị cắt dở)
+      part = part.filter(b => !((x0 > 0 && b.x - b.w/2 < x0 + m) || (y0 > 0 && b.y - b.h/2 < y0 + m) ||
+                               (x0 + tw < W && b.x + b.w/2 > x0 + tw - m) || (y0 + th < H && b.y + b.h/2 > y0 + th - m)));
+      all = all.concat(part);
+    }
+  }
+  return nms(all, CONFIG.iou);
+}
+
+/* ====== TRẠNG THÁI KẾT QUẢ ====== */
+const R = { img: null, dets: [], conf: CONFIG.conf, roi: null, roiBase: null, roiOn: true, mode: 'view', zoom: 1, rv: [], rvIdx: 0, ms: 0 };
+const cv = $('cv'), g = cv.getContext('2d');
+
+function medSize(){
+  const a = R.dets.filter(d => !d.manual).map(d => Math.max(d.w, d.h)).sort((p, q) => p - q);
+  return a.length ? a[Math.floor(a.length / 2)] : Math.max(R.img.width, R.img.height) / 40;
+}
+function inRoi(d){ if(!R.roiOn || !R.roi) return true; const dx = d.x - R.roi.x, dy = d.y - R.roi.y; return dx*dx + dy*dy <= R.roi.r * R.roi.r; }
+function state(d){ // 'sure' | 'unsure' | 'added' | null
+  if(d.removed) return null;
+  if(d.manual) return 'added';
+  if(d.s < R.conf) return null;
+  if(d.confirmed) return 'sure';
+  return d.s < R.conf + CONFIG.unsureBand ? 'unsure' : 'sure';
+}
+function fitRoi(){
+  const pts = R.dets.filter(d => d.s >= R.conf + CONFIG.unsureBand);
+  const P = pts.length >= 5 ? pts : R.dets.filter(d => d.s >= R.conf);
+  if(P.length < 3){ R.roiBase = null; R.roi = null; return; }
+  const med = a => { const b = a.slice().sort((p, q) => p - q); return b[Math.floor(b.length / 2)]; };
+  const x = med(P.map(d => d.x)), y = med(P.map(d => d.y));
+  const dist = P.map(d => Math.hypot(d.x - x, d.y - y)).sort((p, q) => p - q);
+  const r = dist[Math.min(dist.length - 1, Math.floor(dist.length * 0.98))] + medSize() * 1.2;
+  R.roiBase = { x, y, r }; R.roi = { x, y, r }; $('rgRoi').value = 1;
+}
+
+function draw(){
+  const img = R.img; if(!img) return;
+  cv.width = img.width; cv.height = img.height;
+  g.drawImage(img, 0, 0);
+  const lw = Math.max(2, Math.round(Math.max(img.width, img.height) / 500));
+  let nS = 0, nU = 0, nA = 0;
+  if(R.roiOn && R.roi){
+    g.save(); g.fillStyle = 'rgba(0,0,0,.45)';
+    g.beginPath(); g.rect(0, 0, img.width, img.height); g.arc(R.roi.x, R.roi.y, R.roi.r, 0, Math.PI*2, true); g.fill('evenodd');
+    g.restore();
+    g.lineWidth = lw * 1.5; g.strokeStyle = '#ffffff'; g.setLineDash([lw*5, lw*4]);
+    g.beginPath(); g.arc(R.roi.x, R.roi.y, R.roi.r, 0, Math.PI*2); g.stroke(); g.setLineDash([]);
+  }
+  for(const d of R.dets){
+    const st = state(d); if(!st || !inRoi(d)) continue;
+    const rr = Math.max(d.w, d.h) * 0.42;
+    g.lineWidth = lw;
+    if(st === 'sure'){ nS++; g.strokeStyle = '#21d066'; }
+    else if(st === 'unsure'){ nU++; g.strokeStyle = '#ff9a1a'; g.lineWidth = lw * 1.6; }
+    else { nA++; g.strokeStyle = '#2f86ff'; g.lineWidth = lw * 1.6; }
+    g.beginPath(); g.arc(d.x, d.y, rr, 0, Math.PI*2); g.stroke();
+  }
+  if(R.rv.length && !$('review').classList.contains('hidden')){
+    const d = R.rv[R.rvIdx]; if(d){ g.lineWidth = lw * 2.5; g.strokeStyle = '#ffffff';
+      g.beginPath(); g.arc(d.x, d.y, Math.max(d.w, d.h) * 0.9, 0, Math.PI*2); g.stroke(); }
+  }
+  $('nTotal').textContent = nS + nU + nA; $('nSure').textContent = nS; $('nUnsure').textContent = nU; $('nAdded').textContent = nA;
+  cv.style.width = (100 * R.zoom) + '%';
+}
+
+/* ====== MỞ ẢNH ====== */
+function loadImage(file){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const s = Math.min(1, CONFIG.maxSide / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c);
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Không đọc được ảnh')); };
+    im.src = url;
+  });
+}
+async function onFile(e){
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if(!f) return;
+  if(!session){ alert('Mô hình chưa tải xong, chờ vài giây rồi thử lại.'); return; }
+  busy(true, $('chkFine').checked ? 'Đang đếm kỹ… (10–40 giây)' : 'Đang đếm… (vài giây)');
+  try{
+    const img = await loadImage(f);
+    const t0 = performance.now();
+    const dets = await runAll(img, $('chkFine').checked);
+    Object.assign(R, { img, dets, conf: store.get('conf', CONFIG.conf), roiOn: true, zoom: 1, rv: [], rvIdx: 0, ms: performance.now() - t0 });
+    $('rgConf').value = R.conf; $('txtLabel').value = '';
+    fitRoi(); setMode('view'); show('result'); draw();
+    $('timeInfo').textContent = `Đếm trong ${(R.ms/1000).toFixed(1)} giây · ảnh ${img.width}×${img.height}`;
+  }catch(err){ console.error(err); alert('Lỗi khi đếm: ' + (err.message || err)); }
+  busy(false);
+}
+$('btnCamera').onclick = () => $('fileCam').click();
+$('btnPick').onclick = () => $('filePick').click();
+$('fileCam').onchange = onFile; $('filePick').onchange = onFile;
+
+/* ====== SỬA BẰNG TAY ====== */
+const HINTS = { view: 'Chạm "Soát chỗ cần xem" để kiểm từng chấm cam.', add: 'Chạm vào cọng bị sót để thêm (chấm xanh dương).',
+  del: 'Chạm vào chấm đếm sai để bỏ.', roi: 'Chạm vào tâm miệng cốc để dời vùng; kéo thanh "Vùng cốc" để to/nhỏ.' };
+function setMode(m){ R.mode = m; document.querySelectorAll('.toolbar button').forEach(b => b.classList.toggle('on', b.dataset.mode === m)); $('modeHint').textContent = HINTS[m]; }
+document.querySelectorAll('.toolbar button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+function toImg(ev){ const r = cv.getBoundingClientRect(); return { x: (ev.clientX - r.left) * cv.width / r.width, y: (ev.clientY - r.top) * cv.height / r.height }; }
+function nearest(p, maxR){
+  let best = null, bd = Infinity;
+  for(const d of R.dets){ if(!state(d) || !inRoi(d)) continue; const dd = Math.hypot(d.x - p.x, d.y - p.y); if(dd < bd){ bd = dd; best = d; } }
+  return bd <= maxR ? best : null;
+}
+cv.addEventListener('click', ev => {
+  if(!R.img) return; const p = toImg(ev), ms = medSize();
+  if(R.mode === 'add'){ R.dets.push({ x: p.x, y: p.y, w: ms, h: ms, s: 1, manual: true }); }
+  else if(R.mode === 'del'){ const d = nearest(p, ms * 0.9); if(d){ if(d.manual) R.dets.splice(R.dets.indexOf(d), 1); else d.removed = true; } }
+  else if(R.mode === 'roi'){ if(!R.roi){ R.roiBase = { x: p.x, y: p.y, r: Math.min(R.img.width, R.img.height) * .35 }; R.roi = { ...R.roiBase }; }
+    R.roiBase.x = p.x; R.roiBase.y = p.y; R.roi.x = p.x; R.roi.y = p.y; R.roiOn = true; $('btnRoiOff').textContent = 'Tắt'; }
+  draw();
+});
+$('rgConf').oninput = e => { R.conf = parseFloat(e.target.value); store.set('conf', R.conf); draw(); };
+$('rgRoi').oninput = e => { if(!R.roiBase) return; R.roi.r = R.roiBase.r * parseFloat(e.target.value); draw(); };
+$('btnRoiOff').onclick = () => { R.roiOn = !R.roiOn; $('btnRoiOff').textContent = R.roiOn ? 'Tắt' : 'Bật'; draw(); };
+$('zoomIn').onclick = () => { R.zoom = Math.min(5, R.zoom * 1.5); draw(); };
+$('zoomOut').onclick = () => { R.zoom = Math.max(1, R.zoom / 1.5); draw(); };
+
+/* ====== SOÁT CHỖ CẦN XEM ====== */
+function openReview(){
+  R.rv = R.dets.filter(d => state(d) === 'unsure' && inRoi(d)).sort((p, q) => p.s - q.s); R.rvIdx = 0;
+  if(!R.rv.length){ alert('Không còn chỗ nào cần xem.'); return; }
+  $('review').classList.remove('hidden'); showRv();
+}
+function showRv(){
+  if(R.rvIdx >= R.rv.length){ closeRv(); alert('Đã soát xong.'); return; }
+  const d = R.rv[R.rvIdx], c = $('rvCanvas'), x = c.getContext('2d'), half = Math.max(d.w, d.h) * 2.2;
+  x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(R.img, d.x - half, d.y - half, half*2, half*2, 0, 0, c.width, c.height);
+  x.lineWidth = 3; x.strokeStyle = '#ff9a1a'; x.beginPath(); x.arc(c.width/2, c.height/2, c.width * Math.max(d.w, d.h) * .42 / (half*2), 0, Math.PI*2); x.stroke();
+  $('rvPos').textContent = `(${R.rvIdx + 1}/${R.rv.length})`;
+  // cuộn ảnh lớn tới chỗ đang soát
+  const vp = $('viewport'), rect = cv.getBoundingClientRect(), k = rect.width / cv.width;
+  vp.scrollLeft = d.x * k - vp.clientWidth / 2; vp.scrollTop = d.y * k - vp.clientHeight / 2;
+  draw();
+}
+function closeRv(){ $('review').classList.add('hidden'); R.rv = []; draw(); }
+$('btnReview').onclick = openReview;
+$('rvYes').onclick = () => { R.rv[R.rvIdx].confirmed = true; R.rvIdx++; showRv(); };
+$('rvNo').onclick = () => { R.rv[R.rvIdx].removed = true; R.rvIdx++; showRv(); };
+$('rvSkip').onclick = () => { R.rvIdx++; showRv(); };
+$('rvClose').onclick = closeRv;
+
+/* ====== LƯU & LỊCH SỬ ====== */
+function thumb(){
+  const s = 160 / Math.max(cv.width, cv.height), c = document.createElement('canvas');
+  c.width = Math.round(cv.width * s); c.height = Math.round(cv.height * s);
+  c.getContext('2d').drawImage(cv, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.7);
+}
+$('btnSave').onclick = () => {
+  closeRv();
+  const h = store.get('history', []);
+  h.unshift({ t: Date.now(), n: +$('nTotal').textContent, sure: +$('nSure').textContent, unsure: +$('nUnsure').textContent,
+              added: +$('nAdded').textContent, label: $('txtLabel').value.trim(), img: thumb() });
+  while(h.length > 300) h.pop();
+  if(!store.set('history', h)){ h.forEach((e, i) => { if(i > 50) e.img = ''; }); store.set('history', h); }
+  alert('Đã lưu: ' + $('nTotal').textContent + ' cọng');
+};
+$('btnNew').onclick = () => { closeRv(); show('home'); };
+function renderHistory(){
+  const h = store.get('history', []), L = $('histList'); L.innerHTML = '';
+  if(!h.length){ L.innerHTML = '<p class="hint">Chưa có kết quả nào.</p>'; return; }
+  h.forEach((e, i) => {
+    const div = document.createElement('div'); div.className = 'hist-item';
+    const im = document.createElement('img'); im.src = e.img || ''; im.alt = '';
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const b = document.createElement('b'); b.textContent = e.n + ' cọng';
+    const d1 = document.createElement('div'); d1.textContent = e.label || '(không ghi chú)';
+    const d2 = document.createElement('div'); d2.textContent = new Date(e.t).toLocaleString('vi-VN') + (e.unsure ? ` · còn ${e.unsure} chỗ chưa soát` : '');
+    meta.append(b, d1, d2);
+    const del = document.createElement('button'); del.textContent = 'Xoá';
+    del.onclick = () => { if(confirm('Xoá kết quả này?')){ h.splice(i, 1); store.set('history', h); renderHistory(); } };
+    div.append(im, meta, del); L.append(div);
+  });
+}
+$('btnHistory').onclick = () => { closeRv(); renderHistory(); show('history'); };
+$('btnBack').onclick = () => show(R.img ? 'result' : 'home');
+$('btnCsv').onclick = () => {
+  const h = store.get('history', []);
+  const rows = [['Thời gian', 'Số cọng', 'Chắc chắn', 'Cần xem', 'Tự thêm', 'Ghi chú']]
+    .concat(h.map(e => [new Date(e.t).toLocaleString('vi-VN'), e.n, e.sure, e.unsure, e.added, e.label]));
+  const csv = '﻿' + rows.map(r => r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'dem_tinh_' + new Date().toISOString().slice(0, 10) + '.csv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+
+/* ====== KHỞI ĐỘNG ====== */
+$('rgConf').value = store.get('conf', CONFIG.conf);
+if('serviceWorker' in navigator && location.protocol === 'https:'){ navigator.serviceWorker.register('sw.js').catch(() => {}); }
+loadModel();
+</script>
+</body>
+</html>
