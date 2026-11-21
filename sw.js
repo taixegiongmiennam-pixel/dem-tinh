@@ -1,6 +1,6 @@
 // Lưu app + mô hình + thư viện vào máy để lần sau dùng không cần mạng.
 // Đổi VERSION mỗi khi cập nhật mô hình hoặc app.
-const VERSION = 'dem-tinh-v1';
+const VERSION = 'dem-tinh-v2';
 const CDN = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
 const PARTS = 3;
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',

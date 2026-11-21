@@ -93,7 +93,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 120px}
       <button class="big-btn secondary" id="btnPick" type="button">Chọn ảnh có sẵn</button>
       <input id="fileCam" type="file" accept="image/*" capture="environment" class="hidden">
       <input id="filePick" type="file" accept="image/*" class="hidden">
-      <label class="row" style="margin-top:4px"><input type="checkbox" id="chkFine"> <span style="font-size:14px">Đếm kỹ (cốc rất nhiều cọng, chậm hơn)</span></label>
+      <input type="checkbox" id="chkFine" class="hidden">
       <div id="status">Đang tải mô hình…</div>
     </div>
     <div class="card">
@@ -103,7 +103,8 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 120px}
         <li>Cả miệng cốc nằm gọn trong khung, chiếm khoảng 2/3 ảnh.</li>
         <li>Đủ sáng, không lóa đèn. Chờ hết sương nitơ hoặc lau sương trước khi chụp.</li>
         <li>Phải <b>thấy đầu từng cọng</b>: cọng bị che khuất máy không đếm được.</li>
-        <li>Sau khi đếm: soát các chấm <b style="color:var(--warn)">màu cam</b> là xong.</li>
+        <li>Sau khi đếm: bấm <b>Soát chỗ cần xem</b> để kiểm các vòng <b style="color:var(--warn)">màu cam</b> (vòng nét liền = máy đang đếm nhưng chưa chắc; nét đứt = có thể bị sót).</li>
+        <li>Nếu ảnh lọt cốc khác: bấm <b>Vùng cốc</b> rồi chạm vào tâm cốc cần đếm.</li>
       </ul>
     </div>
   </section>
@@ -115,7 +116,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 120px}
         <div class="count"><span id="nTotal">0</span><small>cọng</small></div>
         <div class="chips">
           <span class="chip"><span class="dot" style="background:var(--ok)"></span>Chắc chắn <b id="nSure">0</b></span>
-          <span class="chip"><span class="dot" style="background:var(--warn)"></span>Cần xem <b id="nUnsure">0</b></span>
+          <span class="chip"><span class="dot" style="background:var(--warn)"></span>Cần soát <b id="nUnsure">0</b></span>
           <span class="chip"><span class="dot" style="background:var(--add)"></span>Tự thêm <b id="nAdded">0</b></span>
         </div>
       </div>
@@ -187,8 +188,9 @@ const CONFIG = {
   modelParts: 3,
   ortCdn: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/',
   size: 960,            // cỡ ảnh vào mô hình
-  conf: 0.35,           // ngưỡng mặc định (chọn theo sai số đếm trên tập kiểm tra)
-  unsureBand: 0.20,     // điểm trong [conf, conf+band) -> tô cam "cần xem"
+  conf: 0.30,           // ngưỡng mặc định: sai số đếm nhỏ nhất trên 68 ảnh kiểm tra
+  unsureBand: 0.12,     // điểm trong [conf, conf+band) -> tô cam "cần xem" (đang được đếm)
+  maybeBand: 0.12,      // điểm trong [conf-band, conf) -> vòng nét đứt "có thể sót" (chưa đếm)
   iou: 0.5,
   minConf: 0.10,        // giữ mọi khung >= mức này để kéo thanh Lỏng–Chặt không cần chạy lại
   maxSide: 3000         // thu nhỏ ảnh quá lớn cho đỡ tốn bộ nhớ
@@ -306,13 +308,16 @@ function medSize(){
   return a.length ? a[Math.floor(a.length / 2)] : Math.max(R.img.width, R.img.height) / 40;
 }
 function inRoi(d){ if(!R.roiOn || !R.roi) return true; const dx = d.x - R.roi.x, dy = d.y - R.roi.y; return dx*dx + dy*dy <= R.roi.r * R.roi.r; }
-function state(d){ // 'sure' | 'unsure' | 'added' | null
+function state(d){ // 'sure' | 'unsure' | 'added' (đều được đếm) | 'maybe' (chưa đếm) | null
   if(d.removed) return null;
   if(d.manual) return 'added';
-  if(d.s < R.conf) return null;
   if(d.confirmed) return 'sure';
-  return d.s < R.conf + CONFIG.unsureBand ? 'unsure' : 'sure';
+  if(d.s >= R.conf + CONFIG.unsureBand) return 'sure';
+  if(d.s >= R.conf) return 'unsure';
+  if(d.s >= R.conf - CONFIG.maybeBand) return 'maybe';
+  return null;
 }
+const counted = st => st === 'sure' || st === 'unsure' || st === 'added';
 function fitRoi(){
   const pts = R.dets.filter(d => d.s >= R.conf + CONFIG.unsureBand);
   const P = pts.length >= 5 ? pts : R.dets.filter(d => d.s >= R.conf);
@@ -329,7 +334,7 @@ function draw(){
   cv.width = img.width; cv.height = img.height;
   g.drawImage(img, 0, 0);
   const lw = Math.max(2, Math.round(Math.max(img.width, img.height) / 500));
-  let nS = 0, nU = 0, nA = 0;
+  let nS = 0, nU = 0, nA = 0, nM = 0;
   if(R.roiOn && R.roi){
     g.save(); g.fillStyle = 'rgba(0,0,0,.45)';
     g.beginPath(); g.rect(0, 0, img.width, img.height); g.arc(R.roi.x, R.roi.y, R.roi.r, 0, Math.PI*2, true); g.fill('evenodd');
@@ -343,14 +348,15 @@ function draw(){
     g.lineWidth = lw;
     if(st === 'sure'){ nS++; g.strokeStyle = '#21d066'; }
     else if(st === 'unsure'){ nU++; g.strokeStyle = '#ff9a1a'; g.lineWidth = lw * 1.6; }
-    else { nA++; g.strokeStyle = '#2f86ff'; g.lineWidth = lw * 1.6; }
-    g.beginPath(); g.arc(d.x, d.y, rr, 0, Math.PI*2); g.stroke();
+    else if(st === 'added'){ nA++; g.strokeStyle = '#2f86ff'; g.lineWidth = lw * 1.6; }
+    else { nM++; g.strokeStyle = '#ff9a1a'; g.setLineDash([lw*2, lw*2]); }
+    g.beginPath(); g.arc(d.x, d.y, rr, 0, Math.PI*2); g.stroke(); g.setLineDash([]);
   }
   if(R.rv.length && !$('review').classList.contains('hidden')){
     const d = R.rv[R.rvIdx]; if(d){ g.lineWidth = lw * 2.5; g.strokeStyle = '#ffffff';
       g.beginPath(); g.arc(d.x, d.y, Math.max(d.w, d.h) * 0.9, 0, Math.PI*2); g.stroke(); }
   }
-  $('nTotal').textContent = nS + nU + nA; $('nSure').textContent = nS; $('nUnsure').textContent = nU; $('nAdded').textContent = nA;
+  $('nTotal').textContent = nS + nU + nA; $('nSure').textContent = nS; $('nUnsure').textContent = nU + nM; $('nAdded').textContent = nA;
   cv.style.width = (100 * R.zoom) + '%';
 }
 
@@ -376,8 +382,8 @@ async function onFile(e){
     const img = await loadImage(f);
     const t0 = performance.now();
     const dets = await runAll(img, $('chkFine').checked);
-    Object.assign(R, { img, dets, conf: store.get('conf', CONFIG.conf), roiOn: true, zoom: 1, rv: [], rvIdx: 0, ms: performance.now() - t0 });
-    $('rgConf').value = R.conf; $('txtLabel').value = '';
+    Object.assign(R, { img, dets, conf: store.get('conf', CONFIG.conf), roiOn: false, zoom: 1, rv: [], rvIdx: 0, ms: performance.now() - t0 });
+    $('rgConf').value = R.conf; $('txtLabel').value = ''; $('btnRoiOff').textContent = 'Bật';
     fitRoi(); setMode('view'); show('result'); draw();
     $('timeInfo').textContent = `Đếm trong ${(R.ms/1000).toFixed(1)} giây · ảnh ${img.width}×${img.height}`;
   }catch(err){ console.error(err); alert('Lỗi khi đếm: ' + (err.message || err)); }
@@ -395,12 +401,17 @@ document.querySelectorAll('.toolbar button').forEach(b => b.onclick = () => setM
 function toImg(ev){ const r = cv.getBoundingClientRect(); return { x: (ev.clientX - r.left) * cv.width / r.width, y: (ev.clientY - r.top) * cv.height / r.height }; }
 function nearest(p, maxR){
   let best = null, bd = Infinity;
-  for(const d of R.dets){ if(!state(d) || !inRoi(d)) continue; const dd = Math.hypot(d.x - p.x, d.y - p.y); if(dd < bd){ bd = dd; best = d; } }
+  for(const d of R.dets){ if(!counted(state(d)) || !inRoi(d)) continue; const dd = Math.hypot(d.x - p.x, d.y - p.y); if(dd < bd){ bd = dd; best = d; } }
   return bd <= maxR ? best : null;
 }
 cv.addEventListener('click', ev => {
   if(!R.img) return; const p = toImg(ev), ms = medSize();
-  if(R.mode === 'add'){ R.dets.push({ x: p.x, y: p.y, w: ms, h: ms, s: 1, manual: true }); }
+  if(R.mode === 'add'){
+    // chạm trúng vòng nét đứt "có thể sót" -> xác nhận vòng đó, không tạo chấm mới
+    let near = null, bd = ms * 0.6;
+    for(const d of R.dets){ if(state(d) !== 'maybe') continue; const dd = Math.hypot(d.x - p.x, d.y - p.y); if(dd < bd){ bd = dd; near = d; } }
+    if(near) near.confirmed = true; else R.dets.push({ x: p.x, y: p.y, w: ms, h: ms, s: 1, manual: true });
+  }
   else if(R.mode === 'del'){ const d = nearest(p, ms * 0.9); if(d){ if(d.manual) R.dets.splice(R.dets.indexOf(d), 1); else d.removed = true; } }
   else if(R.mode === 'roi'){ if(!R.roi){ R.roiBase = { x: p.x, y: p.y, r: Math.min(R.img.width, R.img.height) * .35 }; R.roi = { ...R.roiBase }; }
     R.roiBase.x = p.x; R.roiBase.y = p.y; R.roi.x = p.x; R.roi.y = p.y; R.roiOn = true; $('btnRoiOff').textContent = 'Tắt'; }
@@ -414,7 +425,8 @@ $('zoomOut').onclick = () => { R.zoom = Math.max(1, R.zoom / 1.5); draw(); };
 
 /* ====== SOÁT CHỖ CẦN XEM ====== */
 function openReview(){
-  R.rv = R.dets.filter(d => state(d) === 'unsure' && inRoi(d)).sort((p, q) => p.s - q.s); R.rvIdx = 0;
+  R.rv = R.dets.filter(d => (state(d) === 'unsure' || state(d) === 'maybe') && inRoi(d))
+    .sort((p, q) => Math.abs(p.s - R.conf) - Math.abs(q.s - R.conf)); R.rvIdx = 0;
   if(!R.rv.length){ alert('Không còn chỗ nào cần xem.'); return; }
   $('review').classList.remove('hidden'); showRv();
 }
