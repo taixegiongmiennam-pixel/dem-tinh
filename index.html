@@ -122,6 +122,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
         <li>Đủ sáng, không lóa đèn. Chờ hoặc quạt bớt sương nitơ trước khi chụp.</li>
         <li>Ống chia cốc: chọn <b>Ống chia cốc</b>, nhập số liều mỗi cốc đầy. App đánh số từng cốc, cốc nào khác số chuẩn sẽ <b>tô cam</b> để soát.</li>
         <li>Luôn bấm <b>Soát</b> cho đến khi hết mục cam rồi mới lưu.</li>
+        <li>Kiểm kê: ô Ghi chú ghi <b>mã ống trước</b>, ví dụ <b>B3-O5</b> (bình 3, ống 5). Cuối tuần vào Lịch sử → <b>Xuất CSV</b> để đối chiếu sổ tồn kho.</li>
       </ul>
     </div>
   </section>
@@ -170,7 +171,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
       </div>
       <div class="row"><label for="rgConf">Lỏng</label><input type="range" id="rgConf" min="0.10" max="0.70" step="0.01"><label>Chặt</label></div>
       <div class="row" id="roiRow"><label>Vùng cốc</label><button type="button" id="btnRoiToggle" style="flex:1">Bật vùng cốc</button></div>
-      <div class="row"><input type="text" id="txtLabel" placeholder="Ghi chú: tên giống, số ống, bình…"></div>
+      <div class="row"><input type="text" id="txtLabel" placeholder="Mã ống trước: B3-O5 (bình 3, ống 5), rồi ghi chú…"></div>
       <div class="row">
         <button type="button" id="btnSave" class="primary" style="flex:1">Lưu kết quả</button>
         <button type="button" id="btnNew" style="flex:1">Đếm ảnh khác</button>
