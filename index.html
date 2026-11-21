@@ -101,7 +101,10 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
         <button type="button" data-m="loose" class="on">Cọng rời / bó</button>
         <button type="button" data-m="goblet">Ống chia cốc</button>
       </div>
-      <div class="row hidden" id="capRow"><label for="inCap">Số liều mỗi cốc đầy</label><input type="number" id="inCap" min="1" max="200" value="25" inputmode="numeric"></div>
+      <div class="hidden" id="capRow">
+        <div class="row"><label for="inCap">Số liều mỗi cốc đầy</label><input type="number" id="inCap" min="1" max="200" value="25" inputmode="numeric"></div>
+        <div class="row"><label for="inExp">Số cốc trong ống (nếu biết)</label><input type="number" id="inExp" min="0" max="500" placeholder="vd 33" inputmode="numeric"></div>
+      </div>
       <button class="big-btn" id="btnCamera" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="4"/></svg>
         Chụp ảnh
@@ -428,7 +431,7 @@ function recompute(){
       else if(Math.hypot(d.x - it.canister.x, d.y - it.canister.y) <= it.canister.r && d.s >= it.conf + CONFIG.unsureBand) it.strays.push(d);
     }
     let total = 0, pending = 0;
-    for(const g of it.goblets){ const v = g.fixed ?? g.auto; total += v; if(g.fixed == null && (g.auto !== it.cap || g.cut)) pending++; }
+    for(const g of it.goblets){ const v = g.fixed ?? g.auto; total += v; if(g.fixed == null && (g.auto !== it.cap || g.cut || g.manual)) pending++; }
     it.total = total; it.pending = pending + (it.strays.length ? 1 : 0);
   }else{
     let n = 0, u = 0;
@@ -461,7 +464,7 @@ function draw(){
   if(it.mode === 'goblet'){
     const fs = Math.max(14, it.rg * 0.55);
     for(const gb of it.goblets){
-      const v = gb.fixed ?? gb.auto, good = gb.fixed != null || (gb.auto === it.cap && !gb.cut);
+      const v = gb.fixed ?? gb.auto, good = gb.fixed != null || (gb.auto === it.cap && !gb.cut && !gb.manual);
       g.lineWidth = lw * (good ? 1.5 : 2.5); g.strokeStyle = gb.cut ? '#ff3b3b' : good ? '#21d066' : '#ff9a1a';
       if(gb.cut) g.setLineDash([lw*4, lw*3]);
       g.beginPath(); g.arc(gb.x, gb.y, it.rg, 0, Math.PI*2); g.stroke(); g.setLineDash([]);
@@ -502,6 +505,8 @@ function renderSummary(){
     if(cut) w.push(`⚠ Có <b>${cut} cốc nằm sát/bị cắt ở mép ảnh</b> (vòng đỏ nét đứt) – nên chụp lại cho cả ống nằm trọn trong khung.`);
     if(it.strays.length) w.push(`⚠ Có <b>${it.strays.length} điểm nghi là cọng rớt ngoài cốc</b> (vòng tím) – hãy kiểm tra trực tiếp.`);
     if(!it.goblets.length) w.push('⚠ Không tìm thấy cốc nào. Hãy chọn chế độ "Cọng rời / bó" hoặc chụp lại gần hơn.');
+    if(it.exp && it.goblets.length !== it.exp) w.push(`⚠ Tìm được <b>${it.goblets.length}/${it.exp} cốc</b>. Bấm <b>+ Thêm</b> rồi chạm vào chỗ cốc bị sót (cốc nghiêng, khuất) để thêm cốc.`);
+    else if(!it.exp && it.goblets.length) w.push(`Tìm được <b>${it.goblets.length} cốc</b>. Nếu ống có nhiều cốc hơn: bấm <b>+ Thêm</b> rồi chạm vào cốc bị sót.`);
   }
   if(it.ms && it.ms * (CONFIG.size / Math.max(it.W, it.H)) < 12 && it.tiles <= 1) w.push('⚠ Đầu cọng trong ảnh quá nhỏ – hãy chụp gần hơn hoặc dùng ảnh gốc (không qua Zalo).');
   $('warns').innerHTML = w.map(x => `<div class="warnbox">${x}</div>`).join('');
@@ -538,7 +543,7 @@ async function processFiles(files){
       const img = await decode(files[i]), t0 = performance.now();
       const res = await countImage(img, (k, n) => { $('busyText').textContent = `Đang đếm ảnh ${i + 1}/${files.length} – phóng to phần ${k}/${n}…`; });
       const it = { file: files[i], img, W: img.width, H: img.height, dets: res.dets, ms: res.ms, tiles: res.tiles, ms_: performance.now() - t0,
-        mode: MODE.m, cap: MODE.cap, conf: MODE.m === 'goblet' ? CONFIG.confGoblet : CONFIG.confLoose,
+        mode: MODE.m, cap: MODE.cap, exp: MODE.exp || 0, conf: MODE.m === 'goblet' ? CONFIG.confGoblet : CONFIG.confLoose,
         roi: null, roiOn: false, zoom: 1, label: '', thumb: thumbOf(img), goblets: [], strays: [], rg: 0, canister: null, saved: false };
       setupItem(it);
       if(files.length > 1) it.img = null;              // nhiều ảnh: giải phóng bộ nhớ, mở lại khi cần
@@ -642,6 +647,11 @@ const endDrag = () => { if(drag){ drag = null; recompute(); draw(); } };
 cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
 cv.addEventListener('click', ev => {
   if(!R || R.ui === 'roi') return; const p = toImg(ev), ms = medSize();
+  if(R.ui === 'add' && R.mode === 'goblet' && R.rg && !R.goblets.some(gb => Math.hypot(gb.x - p.x, gb.y - p.y) < R.rg * 1.2)){
+    // chạm vào chỗ trống -> thêm một cốc bị sót, rồi mở bảng soát để chốt số
+    R.goblets.push({ id: Math.max(0, ...R.goblets.map(x => x.id)) + 1, x: p.x, y: p.y, cut: false, fixed: null, auto: 0, manual: true });
+    recompute(); draw(); openReview(R.goblets.length - 1); return;
+  }
   if(R.ui === 'add'){
     const near = nearestDet(p, ms * 0.6, d => state(d) === 'maybe');
     if(near) near.confirmed = true; else R.dets.push({ x: p.x, y: p.y, w: ms, h: ms, s: 1, manual: true });
@@ -664,7 +674,7 @@ const RV = { on: false, kind: 'straw', list: [], i: 0, val: 0 };
 function openReview(startGob){
   if(R.mode === 'goblet'){
     RV.kind = 'gob';
-    RV.list = R.goblets.filter(gb => gb.fixed == null && (gb.auto !== R.cap || gb.cut)).sort((a, b) => a.id - b.id);
+    RV.list = R.goblets.filter(gb => gb.fixed == null && (gb.auto !== R.cap || gb.cut || gb.manual)).sort((a, b) => a.id - b.id);
     if(startGob != null){ const gb = R.goblets[startGob]; RV.list = [gb].concat(RV.list.filter(x => x !== gb)); }
     if(!RV.list.length){
       if(R.strays.length){ toast(`Các cốc đã soát xong. Còn ${R.strays.length} điểm tím nghi cọng rớt – kiểm tra trực tiếp.`); }
@@ -769,8 +779,9 @@ $('btnCsv').onclick = () => {
 /* =================== KHỞI ĐỘNG =================== */
 function syncModeUI(){
   document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('on', b.dataset.m === MODE.m));
-  $('capRow').classList.toggle('hidden', MODE.m !== 'goblet'); $('inCap').value = MODE.cap;
+  $('capRow').classList.toggle('hidden', MODE.m !== 'goblet'); $('inCap').value = MODE.cap; $('inExp').value = MODE.exp || '';
 }
+$('inExp').onchange = e => { MODE.exp = Math.max(0, parseInt(e.target.value) || 0); };
 document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => { MODE.m = b.dataset.m; store.set('mode', MODE.m); syncModeUI(); });
 $('inCap').onchange = e => { MODE.cap = Math.max(1, parseInt(e.target.value) || 25); store.set('cap', MODE.cap); };
 $('btnCamera').onclick = () => $('fileCam').click();
