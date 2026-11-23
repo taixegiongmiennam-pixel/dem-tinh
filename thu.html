@@ -733,7 +733,7 @@ function renderList(){
     const im = document.createElement('img'); im.src = it.thumb; im.alt = '';
     const meta = document.createElement('div'); meta.className = 'meta';
     meta.innerHTML = `<b>${it.total} cọng</b>${it.pending ? `<span class="tag">cần soát ${it.pending}</span>` : '<span class="tag ok">đã soát</span>'}` +
-      `<div>${it.vid ? `Video · ${it.vid.frames.length} khung · đồng thuận ${it.vid.agree}` : 'Ảnh'} ${i + 1}${it.mode === 'goblet' ? ` · ${it.goblets.length} cốc` : ''}${it.label ? ' · ' + it.label.replace(/</g, '&lt;') : ''}</div>`;
+      `<div>${it.vid ? `Video ${i + 1} · ${it.vid.frames.length} khung · đồng thuận ${it.vid.agree}` : `Ảnh ${i + 1}`}${it.mode === 'goblet' ? ` · ${it.goblets.length} cốc` : ''}${it.label ? ' · ' + it.label.replace(/</g, '&lt;') : ''}</div>`;
     const del = document.createElement('button'); del.textContent = 'Bỏ';
     del.onclick = e => { e.stopPropagation(); ITEMS.splice(i, 1); if(!ITEMS.length){ show('home'); return; } renderList(); };
     row.onclick = () => openItem(i);
