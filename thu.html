@@ -97,7 +97,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
 </head>
 <body>
 <header>
-  <h1>Đếm Tinh <small style="font-size:12px;font-weight:400;opacity:.85">bản thử video · L1-2311c</small></h1>
+  <h1>Đếm Tinh <small style="font-size:12px;font-weight:400;opacity:.85">bản thử video · L1-2311d</small></h1>
   <button id="btnList" type="button" class="hidden">Danh sách</button>
   <button id="btnHistory" type="button">Lịch sử</button>
 </header>
@@ -584,7 +584,7 @@ async function processFiles(files){
 /* =================== VIDEO: lấy khung nét, đếm từng khung, chốt số (giống tools/dem.py) ===================
    Bản sửa L1 (23/11): mọi bước chờ video đều có hết giờ; lỗi hiện bằng chữ kèm dòng chẩn đoán;
    đường dự phòng 1: mở bản sao của file trong bộ nhớ; đường dự phòng 2: phát video và bắt khung (khi tua không chạy). */
-const BUILD = 'thu-L1-2311c';
+const BUILD = 'thu-L1-2311d';
 const VIDEO = { step: 0.1, maxCand: 80, maxFrames: 8, minGap: 0.5,
   maxMB: 400, copyMB: 200,          // clip nặng hơn maxMB: từ chối; nhẹ hơn copyMB: được thử mở bản sao trong bộ nhớ
   tMeta: 15000, tPlay: 4000, tData: 10000, tSeek: 4000, tTap: 60000, tRead: 30000,   // hết giờ chờ từng bước (ms)
@@ -792,9 +792,9 @@ async function playThrough(v, lim, onFrame, onProg, D){
     const tick = () => {
       if(done) return; const t = v.currentTime;
       if(t !== lastT){ lastT = t; lastAdv = performance.now(); if(v.readyState >= 2){ try{ onFrame(t); }catch(e){ console.error(e); } } }
-      if(t >= lim - 0.03) return fin('đủ');
-      if(useR) v.requestVideoFrameCallback(tick);
+      if(t >= lim - 0.03) fin('đủ');
     };
+    const tickR = () => { tick(); if(!done) v.requestVideoFrameCallback(tickR); };
     const wd = setInterval(() => {                                 // canh chừng: lỗi hoặc đứng hình
       if(v.error) fin('lỗi giải mã err' + v.error.code); else if(performance.now() - lastAdv > VIDEO.stall) fin('đứng hình ở ' + v.currentTime.toFixed(1) + 's');
       else if(onProg) onProg(v.currentTime);
@@ -802,7 +802,7 @@ async function playThrough(v, lim, onFrame, onProg, D){
     v.addEventListener('ended', onEnd);
     const pr = await kick(v);
     if(pr !== 'ok' && v.paused) return fin('không phát được (' + pr + ')');
-    if(useR) v.requestVideoFrameCallback(tick); else iv = setInterval(tick, 40);
+    iv = setInterval(tick, 50); if(useR) v.requestVideoFrameCallback(tickR);       // chạy cả hai: báo-khung của trình duyệt và hẹn giờ (cái nào tới trước thì dùng)
   });
 }
 /* ĐƯỜNG DỰ PHÒNG 2 – lượt 1: phát và chấm độ nét từng 0,1 giây */
