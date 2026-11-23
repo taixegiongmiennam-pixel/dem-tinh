@@ -91,11 +91,13 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
 .frames button.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
 .frames button.rep{border-color:var(--brand-2);border-width:2px}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;background:var(--ink);color:var(--card);padding:10px 16px;border-radius:12px;font-size:15px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:90vw;text-align:center}
+.diag{font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;background:rgba(127,127,127,.15);border:1px dashed rgba(127,127,127,.6);border-radius:8px;padding:8px;word-break:break-word;user-select:all;-webkit-user-select:all}
+#busy.tap .spinner{display:none}
 </style>
 </head>
 <body>
 <header>
-  <h1>Đếm Tinh <small style="font-size:12px;font-weight:400;opacity:.85">bản thử video</small></h1>
+  <h1>Đếm Tinh <small style="font-size:12px;font-weight:400;opacity:.85">bản thử video · L1-2311c</small></h1>
   <button id="btnList" type="button" class="hidden">Danh sách</button>
   <button id="btnHistory" type="button">Lịch sử</button>
 </header>
@@ -126,6 +128,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
       <input id="filePick" type="file" accept="image/*,video/*" multiple class="hidden">
       <div id="status">Đang tải mô hình…</div>
     </div>
+    <div class="card hidden" id="vidErr"></div>
     <div class="card">
       <b>Cách chụp để đếm đúng</b>
       <ul class="tips">
@@ -235,7 +238,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
 </div>
 
 <div id="toast" class="hidden"></div>
-<div id="busy" class="hidden"><div><div class="spinner"></div><div id="busyText">Đang đếm…</div><div id="bar" class="hidden"><i></i></div></div></div>
+<div id="busy" class="hidden"><div><div class="spinner"></div><div id="busyText">Đang đếm…</div><div id="bar" class="hidden"><i></i></div><button type="button" class="big-btn hidden" id="btnTap" style="margin-top:14px">Chạm vào đây để đọc clip</button></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.wasm.min.js"></script>
 <script>
@@ -558,7 +561,7 @@ function makeItem(file, img, res, ms_){
 async function processFiles(files){
   if(!files.length) return;
   if(!session){ toast('Mô hình chưa tải xong, chờ vài giây rồi thử lại.'); return; }
-  const startN = ITEMS.length;
+  const startN = ITEMS.length; $('vidErr').classList.add('hidden');
   for(let i = 0; i < files.length; i++){
     const pre = files.length > 1 ? `Mục ${i + 1}/${files.length} – ` : '';
     try{
@@ -570,7 +573,7 @@ async function processFiles(files){
       const it = makeItem(files[i], img, res, performance.now() - t0);
       if(files.length > 1) it.img = null;              // nhiều ảnh: giải phóng bộ nhớ, mở lại khi cần
       ITEMS.push(it);
-    }catch(err){ console.error(err); toast('Lỗi mục ' + (i + 1) + ': ' + (err.message || err), 5000); }
+    }catch(err){ console.error(err); busy(false); if(err.diag) showVidErr(err); else toast('Lỗi mục ' + (i + 1) + ': ' + (err.message || err), 5000); }
   }
   busy(false);
   if(ITEMS.length === startN) return;
@@ -578,15 +581,57 @@ async function processFiles(files){
   else { renderList(); show('list'); }
 }
 
-/* =================== VIDEO: lấy khung nét, đếm từng khung, chốt số (giống tools/dem.py) =================== */
-const VIDEO = { step: 0.1, maxCand: 80, maxFrames: 8, minGap: 0.5 };
+/* =================== VIDEO: lấy khung nét, đếm từng khung, chốt số (giống tools/dem.py) ===================
+   Bản sửa L1 (23/11): mọi bước chờ video đều có hết giờ; lỗi hiện bằng chữ kèm dòng chẩn đoán;
+   đường dự phòng 1: mở bản sao của file trong bộ nhớ; đường dự phòng 2: phát video và bắt khung (khi tua không chạy). */
+const BUILD = 'thu-L1-2311c';
+const VIDEO = { step: 0.1, maxCand: 80, maxFrames: 8, minGap: 0.5,
+  maxMB: 400, copyMB: 200,          // clip nặng hơn maxMB: từ chối; nhẹ hơn copyMB: được thử mở bản sao trong bộ nhớ
+  tMeta: 15000, tPlay: 4000, tData: 10000, tSeek: 4000, tTap: 60000, tRead: 30000,   // hết giờ chờ từng bước (ms)
+  budgetSeek: 60000,                // lượt tìm khung nét bằng cách tua: tối đa 60 giây
+  maxPlay: 20, stall: 6000 };       // đường phát: chỉ đọc 20 giây đầu; đứng hình 6 giây thì dừng
+const FORCE = new URLSearchParams(location.search).get('thu') || '';   // ?thu=phat | ?thu=saoluu : ép đường dự phòng để kiểm thử
+const HET_GIO = 'hết giờ';
 function isVideo(f){ return /^video\//.test(f.type || '') || /\.(mp4|mov|m4v|avi|3gp|webm)$/i.test(f.name || ''); }
+class VidErr extends Error { constructor(step, why, hint, noRetry){ super(why); this.step = step; this.hint = hint || ''; this.noRetry = !!noRetry; } }
+const HINT = {
+  codec: 'Trên iPhone: Cài đặt → Camera → Định dạng → chọn "Tương thích nhất"; Cài đặt → Camera → Quay video → 1080p 30. Không quay chậm (Slo-mo). Rồi quay lại clip 3–5 giây.',
+  file: 'Safari đã mất file tạm của camera. Hãy quay clip bằng app Camera của iPhone, rồi vào đây bấm "Chọn ảnh / video có sẵn".',
+  again: 'Quay lại clip ngắn 3–5 giây, 1080p. Nếu vẫn lỗi: quay bằng app Camera rồi bấm "Chọn ảnh / video có sẵn".',
+  mem: 'Clip quá nặng với Safari. Quay ngắn 3–5 giây, 1080p 30 (không 4K, không quay chậm), đóng bớt ứng dụng khác.'
+};
+function uaShort(){
+  const u = navigator.userAgent, m = u.match(/(?:iPhone|iPad|CPU) OS (\d+(?:_\d+)*)/);
+  const os = m ? 'iOS ' + m[1].replace(/_/g, '.') : (u.match(/Android [\d.]+/) || u.match(/Windows|Macintosh|Linux/) || ['máy không rõ'])[0];
+  const br = /CriOS/.test(u) ? 'Chrome-iOS' : /FxiOS/.test(u) ? 'Firefox-iOS' : /Chrome\//.test(u) ? 'Chrome' : /Safari\//.test(u) ? 'Safari' : 'trình duyệt khác';
+  return os + ' ' + br + (navigator.standalone ? ' (mở từ MH chính)' : '');
+}
+function newDiag(file){
+  return { f: `${file.type || 'không rõ loại'} · ${(file.size / 1048576).toFixed(1)} MB · «${String(file.name || '').slice(-22)}»`, v: '', steps: [], step: 'NHẬN FILE' };
+}
+function vInfo(v){
+  return `${v.videoWidth}×${v.videoHeight} · ${isFinite(v.duration) ? v.duration.toFixed(1) + ' s' : 'dài=' + v.duration} · rs${v.readyState} ns${v.networkState}` +
+    (v.error ? ` · err${v.error.code}${v.error.message ? ' ' + String(v.error.message).slice(0, 50) : ''}` : '');
+}
+function diagLine(D, err){
+  return [BUILD, uaShort(), D.f, D.v || 'chưa mở được video', err ? `HỎNG Ở: ${err.step || D.step} – ${err.message || err}` : 'đọc được', D.steps.join(' → ')].join(' | ');
+}
+const timeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(HET_GIO), ms))]);
+/* Chờ một trong các sự kiện, có hết giờ. Trả về tên sự kiện hoặc 'hết giờ'. */
+function once(el, evs, ms){
+  return new Promise(res => {
+    const on = e => fin(e.type), to = setTimeout(() => fin(HET_GIO), ms);
+    function fin(x){ clearTimeout(to); evs.forEach(n => el.removeEventListener(n, on)); res(x); }
+    evs.forEach(n => el.addEventListener(n, on));
+  });
+}
 /* Độ nét = phương sai Laplacian trên ảnh xám rộng 640 px */
 function sharpness(srcEl, sw, sh){
   const w = 640, h = Math.max(2, Math.floor(640 * sh / sw));
   const c = sharpness.c || (sharpness.c = document.createElement('canvas')); c.width = w; c.height = h;
   const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(srcEl, 0, 0, w, h);
   const d = x.getImageData(0, 0, w, h).data, n = w * h, gr = new Float32Array(n);
+  sharpness.blank = d[3] === 0 && d[4 * (n >> 1) + 3] === 0 && d[4 * (n - 1) + 3] === 0;     // không vẽ ra được gì (khung trống)
   for(let i = 0, j = 0; i < n; i++, j += 4) gr[i] = Math.round(0.299 * d[j] + 0.587 * d[j+1] + 0.114 * d[j+2]);
   let s = 0, s2 = 0;
   for(let yy = 0; yy < h; yy++){
@@ -598,32 +643,98 @@ function sharpness(srcEl, sw, sh){
   }
   return s2 / n - (s / n) * (s / n);
 }
-function openVideo(file){
-  return new Promise((res, rej) => {
-    const v = document.createElement('video'), url = URL.createObjectURL(file);
-    v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
-    const to = setTimeout(() => fail('quá lâu không mở được'), 20000);
-    const fail = why => { clearTimeout(to); URL.revokeObjectURL(url); rej(new Error('Không đọc được video (' + why + ')')); };
-    v.onerror = () => fail('định dạng không hỗ trợ');
-    v.onloadedmetadata = async () => {
-      clearTimeout(to);
-      try{ await v.play(); v.pause(); }catch(e){}            // iPhone: phải phát một nhịp mới tua lấy khung được
-      if(!isFinite(v.duration) || !v.videoWidth) return fail('không biết độ dài');
-      res({ v, url });
+/* Bấm phát một nhịp (iPhone phải phát rồi mới tua/vẽ khung được). Không bao giờ chờ quá tPlay. */
+async function kick(v){
+  try{
+    const p = v.play(); if(!p || !p.then) return 'ok';
+    return await timeout(p.then(() => 'ok', e => 'chặn:' + (e && e.name || e)), VIDEO.tPlay);
+  }catch(e){ return 'lỗi:' + (e && e.name || e); }
+}
+/* iPhone chặn tự phát (ví dụ Chế độ nguồn điện thấp): cần một lần chạm của người dùng */
+function tapToPlay(v, pre){
+  return new Promise(res => {
+    const b = $('btnTap'), to = setTimeout(() => fin(HET_GIO), VIDEO.tTap);
+    function fin(x){ clearTimeout(to); b.onclick = null; b.classList.add('hidden'); $('busy').classList.remove('tap'); res(x); }
+    busy(true, pre + 'iPhone đang chặn tự phát video (hay gặp khi bật Chế độ nguồn điện thấp). Chạm nút dưới để app đọc clip.');
+    $('busy').classList.add('tap'); b.classList.remove('hidden');
+    b.onclick = () => {
+      let p; try{ p = v.play(); }catch(e){ return fin('lỗi:' + (e && e.name || e)); }
+      if(p && p.then) p.then(() => fin('ok'), e => fin('chặn:' + (e && e.name || e))); else fin('ok');
     };
-    v.src = url; v.load();
   });
+}
+async function waitFrame(v){
+  const t0 = performance.now();
+  while((v.readyState < 2 || !v.videoWidth) && !v.error && performance.now() - t0 < VIDEO.tData) await sleep(50);
+  return v.readyState >= 2 && v.videoWidth > 0 && !v.error;
+}
+/* Mở một nguồn (file gốc hoặc bản sao). Trả về { v, dur, close } hoặc ném VidErr. */
+async function tryOpen(src, D, tag, pre){
+  const v = document.createElement('video'), url = URL.createObjectURL(src);
+  v.muted = true; v.defaultMuted = true; v.setAttribute('muted', ''); v.playsInline = true; v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+  v.preload = 'auto'; v.controls = false; v.loop = false;
+  // iPhone chỉ giải mã khung khi thẻ video nằm trong trang và "nhìn thấy được" -> gắn vào góc, gần như trong suốt
+  v.style.cssText = 'position:fixed;left:0;bottom:0;width:4px;height:4px;opacity:.01;pointer-events:none;z-index:1';
+  document.body.appendChild(v);
+  const close = () => { try{ v.pause(); }catch(e){} v.removeAttribute('src'); try{ v.load(); }catch(e){} v.remove(); URL.revokeObjectURL(url); };   // chỉ thu hồi URL khi đã xong hẳn
+  try{
+    const pm = once(v, ['loadedmetadata', 'error'], VIDEO.tMeta);
+    v.src = url; v.load();
+    const ev = await pm; D.steps.push(tag + ' meta:' + ev);
+    if(ev === 'error' || v.error){ D.v = vInfo(v); throw new VidErr('MỞ FILE', 'trình duyệt không giải mã được clip này (mã lỗi ' + (v.error ? v.error.code : '?') + ')', HINT.codec); }
+    let tapRes = null; const pr = await kick(v); D.steps.push(tag + ' phát:' + pr);
+    if(/^chặn/.test(pr)){ tapRes = await tapToPlay(v, pre); D.steps.push(tag + ' chạm:' + tapRes); busy(true, pre + 'Đang mở video…', 0); }
+    let ok = await waitFrame(v);
+    if(!ok && !v.error && tapRes === null){                         // chưa có khung nào dù không báo chặn: xin một lần chạm
+      tapRes = await tapToPlay(v, pre); D.steps.push(tag + ' chạm:' + tapRes); busy(true, pre + 'Đang mở video…', 0);
+      if(tapRes === 'ok') ok = await waitFrame(v);
+    }
+    try{ v.pause(); }catch(e){}
+    D.v = vInfo(v);
+    if(v.error) throw new VidErr('GIẢI MÃ', 'giải mã clip bị lỗi (mã lỗi ' + v.error.code + ')', HINT.codec);
+    if(!ok){
+      if(tapRes === HET_GIO) throw new VidErr('CHỜ CHẠM', 'chờ 60 giây không thấy chạm nút "Chạm để đọc clip"', 'Bấm Quay video lại và chạm nút khi app hỏi; hoặc tắt Chế độ nguồn điện thấp.', true);
+      throw new VidErr(ev === HET_GIO ? 'MỞ FILE' : 'CHỜ KHUNG ĐẦU', ev === HET_GIO ? 'chờ 15 giây không đọc được thông tin clip' : 'đã có thông tin clip nhưng chờ 10 giây không có khung hình nào', HINT.codec);
+    }
+    if(!isFinite(v.duration) || v.duration <= 0){                  // iPhone đôi khi báo độ dài vô hạn: tua thật xa để ép tính lại
+      try{ v.currentTime = 1e7; }catch(e){}
+      const e1 = await once(v, ['durationchange', 'seeked'], 3000); if(!isFinite(v.duration)) await sleep(300);
+      try{ v.currentTime = 0; }catch(e){} await once(v, ['seeked'], 3000);
+      D.steps.push(tag + ' sửa độ dài:' + e1 + '→' + v.duration); D.v = vInfo(v);
+    }
+    return { v, close, dur: isFinite(v.duration) && v.duration > 0 ? v.duration : null };
+  }catch(e){ if(!D.v) D.v = vInfo(v); close(); throw e; }
+}
+async function openVideo(file, D, pre){
+  if(!file.size) throw new VidErr('NHẬN FILE', 'clip rỗng (0 MB) – camera chưa ghi được gì', HINT.again);
+  if(file.size > VIDEO.maxMB * 1048576) throw new VidErr('NHẬN FILE', `clip quá nặng (hơn ${VIDEO.maxMB} MB)`, HINT.mem);
+  let first = null;
+  if(FORCE !== 'saoluu'){
+    try{ return await tryOpen(file, D, 'A', pre); }
+    catch(e){ first = e; D.steps.push('A hỏng(' + (e.step || '') + ')'); if(e.noRetry || file.size > VIDEO.copyMB * 1048576) throw e; }
+  }
+  // Dự phòng 1: đọc cả file vào bộ nhớ rồi mở bản sao (file tạm của camera bị thu hồi sớm, hoặc loại file ghi sai)
+  busy(true, pre + 'Đang đọc lại file video…', 0);
+  let buf;
+  try{
+    buf = await timeout(file.arrayBuffer ? file.arrayBuffer() : new Response(file).arrayBuffer(), VIDEO.tRead);
+    if(buf === HET_GIO) throw new Error(HET_GIO);
+  }catch(e){ D.steps.push('B đọc file hỏng:' + (e && (e.name || e.message) || e)); throw new VidErr('ĐỌC FILE', 'không đọc được dữ liệu của clip (' + (e && (e.name || e.message) || e) + ')', HINT.file); }
+  D.steps.push('B đọc được ' + (buf.byteLength / 1048576).toFixed(1) + ' MB');
+  const type = /quicktime|mp4|webm|3gpp/.test(file.type || '') ? file.type : (/\.mov$/i.test(file.name || '') ? 'video/quicktime' : 'video/mp4');
+  try{ return await tryOpen(new Blob([buf], { type }), D, 'B', pre); }
+  catch(e){ D.steps.push('B hỏng(' + (e.step || '') + ')'); throw e; }
 }
 function seekTo(v, t){
   return new Promise(res => {
     let done = false; const fin = ok => { if(done) return; done = true; clearTimeout(to); v.removeEventListener('seeked', on); res(ok); };
-    const on = () => fin(true), to = setTimeout(() => fin(false), 5000);
+    const on = () => fin(true), to = setTimeout(() => fin(false), VIDEO.tSeek);
     v.addEventListener('seeked', on);
     try{ v.currentTime = t; }catch(e){ fin(false); }
   }).then(async ok => { for(let k = 0; ok && v.readyState < 2 && k < 50; k++) await sleep(20); await sleep(15); return ok && v.readyState >= 2; });
 }
 function grabFrame(v){
-  const s = Math.min(1, CONFIG.maxSide / Math.max(v.videoWidth, v.videoHeight));
+  const s = Math.min(1, CONFIG.maxSide / Math.max(v.videoWidth, v.videoHeight));     // 4K được thu về cạnh dài 2400 px
   const c = document.createElement('canvas'); c.width = Math.round(v.videoWidth * s); c.height = Math.round(v.videoHeight * s);
   c.getContext('2d').drawImage(v, 0, 0, c.width, c.height); return c;
 }
@@ -647,38 +758,147 @@ function settle(vals){
   const spread = Math.max(...vals) - Math.min(...vals);
   return { chot, freq, spread, agree: vals.length >= 3 && spread <= Math.max(2, 0.01 * chot) ? 'cao' : 'thấp' };
 }
-async function countVideo(file, pre){
-  const T0 = performance.now(); busy(true, pre + 'Đang mở video…', 0); await sleep(30);
-  const { v, url } = await openVideo(file);
-  try{
-    const dur = v.duration, step = Math.max(VIDEO.step, dur / VIDEO.maxCand), cand = [];
-    const nC = Math.max(1, Math.floor((dur - 0.05) / step) + 1);
-    for(let k = 0; k < nC; k++){                                   // lượt 1: chỉ chấm độ nét
-      const t = k * step;
-      if(k % 4 === 0) busy(true, pre + `Đang tìm khung nét… ${k + 1}/${nC}`, 0.25 * k / nC);
-      if(await seekTo(v, Math.min(dur - 0.02, t + 0.005))) cand.push({ t, sharp: sharpness(v, v.videoWidth, v.videoHeight) });
+/* ĐƯỜNG CHÍNH – tua từng mốc để chấm độ nét. Trả về danh sách mốc, hoặc null nếu tua không dùng được (-> đường phát). */
+async function scanSeek(v, dur, pre, D){
+  const step = Math.max(VIDEO.step, dur / VIDEO.maxCand), cand = [], T = performance.now();
+  const nC = Math.max(1, Math.floor((dur - 0.05) / step) + 1); let failRun = 0, fails = 0;
+  for(let k = 0; k < nC; k++){
+    const t = k * step;
+    if(k % 4 === 0) busy(true, pre + `Đang tìm khung nét… ${k + 1}/${nC}`, 0.25 * k / nC);
+    if(await seekTo(v, Math.min(dur - 0.02, t + 0.005))){
+      const sharp = sharpness(v, v.videoWidth, v.videoHeight);
+      if(sharpness.blank){ if(!cand.length){ D.steps.push('tua: khung trống ở ' + t.toFixed(1) + 's'); return null; } }
+      else { cand.push({ t, sharp }); failRun = 0; }
+    }else{
+      failRun++; fails++;
+      if((failRun >= 2 && cand.length < 3) || failRun >= 4){ D.steps.push(`tua hỏng ở ${t.toFixed(1)}s (đã được ${cand.length} mốc)`); return null; }
     }
-    if(!cand.length) throw new Error('Không lấy được khung hình nào từ video');
+    if(performance.now() - T > VIDEO.budgetSeek){ D.steps.push(`tua chậm: dừng ở mốc ${k + 1}/${nC}`); break; }
+  }
+  if(fails) D.steps.push('tua trượt ' + fails + ' mốc');
+  return cand.length ? cand : null;
+}
+/* Phát video từ đầu, gọi onFrame(t) cho mỗi khung mới. Dừng khi tới lim, hết clip, lỗi, hoặc đứng hình. Trả về lý do dừng. */
+async function playThrough(v, lim, onFrame, onProg, D){
+  if(v.currentTime > 0.05 || v.ended){                             // về đầu; tua không được thì nạp lại
+    try{ v.currentTime = 0; }catch(e){}
+    await once(v, ['seeked'], 3000);
+    if(v.currentTime > 0.2){ D.steps.push('nạp lại để về đầu'); const pm = once(v, ['loadeddata', 'error'], 8000); try{ v.load(); }catch(e){} await pm; }
+  }
+  return new Promise(async res => {
+    const useR = typeof v.requestVideoFrameCallback === 'function'; let done = false, lastT = -1, lastAdv = performance.now(), iv = 0;
+    const fin = why => { if(done) return; done = true; clearInterval(iv); clearInterval(wd); v.removeEventListener('ended', onEnd); try{ v.pause(); }catch(e){} res(why); };
+    const onEnd = () => fin('hết clip');
+    const tick = () => {
+      if(done) return; const t = v.currentTime;
+      if(t !== lastT){ lastT = t; lastAdv = performance.now(); if(v.readyState >= 2){ try{ onFrame(t); }catch(e){ console.error(e); } } }
+      if(t >= lim - 0.03) return fin('đủ');
+      if(useR) v.requestVideoFrameCallback(tick);
+    };
+    const wd = setInterval(() => {                                 // canh chừng: lỗi hoặc đứng hình
+      if(v.error) fin('lỗi giải mã err' + v.error.code); else if(performance.now() - lastAdv > VIDEO.stall) fin('đứng hình ở ' + v.currentTime.toFixed(1) + 's');
+      else if(onProg) onProg(v.currentTime);
+    }, 250);
+    v.addEventListener('ended', onEnd);
+    const pr = await kick(v);
+    if(pr !== 'ok' && v.paused) return fin('không phát được (' + pr + ')');
+    if(useR) v.requestVideoFrameCallback(tick); else iv = setInterval(tick, 40);
+  });
+}
+/* ĐƯỜNG DỰ PHÒNG 2 – lượt 1: phát và chấm độ nét từng 0,1 giây */
+async function scanPlay(v, dur, pre, D){
+  const lim = Math.min(dur || VIDEO.maxPlay, VIDEO.maxPlay), cand = []; let last = -1;
+  const why = await playThrough(v, lim, t => {
+    if(t - last < VIDEO.step - 0.02) return;
+    const sharp = sharpness(v, v.videoWidth, v.videoHeight); if(!sharpness.blank){ cand.push({ t, sharp }); last = t; }
+  }, t => busy(true, pre + `Đang phát clip để tìm khung nét… ${t.toFixed(1)}/${lim.toFixed(1)} giây`, 0.25 * Math.min(1, t / lim)), D);
+  D.steps.push(`phát 1: ${why}, ${cand.length} mốc`);
+  return { cand, lim, why };
+}
+/* ĐƯỜNG DỰ PHÒNG 2 – lượt 2: phát lại, tới mốc đã chọn thì chụp khung (lưu thành ảnh JPEG để nhẹ bộ nhớ) */
+async function grabPlay(v, picked, lim, pre, D){
+  const out = picked.map(() => null), jobs = []; let j = 0;
+  const why = await playThrough(v, lim + 0.2, t => {
+    while(j < picked.length && t >= picked[j].t - 0.02){
+      const k = j++; if(k + 1 < picked.length && t >= picked[k + 1].t - 0.02) continue;      // đã trễ quá mốc này
+      const c = grabFrame(v);
+      jobs.push(new Promise(r => c.toBlob(b => { out[k] = b; c.width = c.height = 0; r(); }, 'image/jpeg', 0.95)));
+    }
+  }, t => busy(true, pre + `Đang phát lại để lấy ${picked.length} khung… ${t.toFixed(1)} giây`, 0.25), D);
+  await timeout(Promise.all(jobs), 15000);
+  D.steps.push(`phát 2: ${why}, lấy ${out.filter(Boolean).length}/${picked.length} khung`);
+  return out;
+}
+let LAST_DIAG = '';
+async function countVideo(file, pre){
+  const T0 = performance.now(), D = newDiag(file); let o = null;
+  store.set('dangDoc', { t: Date.now() });                         // để biết nếu Safari tải lại trang giữa chừng (L6)
+  busy(true, pre + 'Đang mở video…', 0); await sleep(30);
+  try{
+    D.step = 'MỞ FILE'; o = await openVideo(file, D, pre);
+    const v = o.v, dur = o.dur;
+    if(dur != null && dur < 0.3) throw new VidErr('ĐỘ DÀI', 'clip quá ngắn (' + dur.toFixed(2) + ' giây)', HINT.again);
+    D.step = 'TÌM KHUNG NÉT';
+    let cand = null, path = 'tua', lim = dur, playWhy = '';
+    if(dur != null && FORCE !== 'phat') cand = await scanSeek(v, dur, pre, D);
+    if(!cand){ path = 'phát'; const r = await scanPlay(v, dur, pre, D); cand = r.cand; lim = r.lim; playWhy = r.why; }
+    if(!cand.length) throw new VidErr('TÌM KHUNG NÉT', 'không lấy được khung hình nào' + (playWhy ? ' (' + playWhy + ')' : ''), HINT.codec);
     const picked = pickSharp(cand), frames = [], tC = performance.now();
-    for(let k = 0; k < picked.length; k++){                        // lượt 2: lấy khung đủ nét và đếm
+    D.step = 'LẤY KHUNG';
+    const blobs = path === 'phát' ? await grabPlay(v, picked, lim, pre, D) : null;
+    for(let k = 0; k < picked.length; k++){                        // lấy khung đủ nét và đếm
       const base = 0.25 + 0.75 * k / picked.length, txt = pre + `Đang đếm khung ${k + 1}/${picked.length}`;
       busy(true, txt + '…', base);
-      if(!await seekTo(v, Math.min(dur - 0.02, picked[k].t + 0.005))) continue;
-      const img = grabFrame(v), t0 = performance.now();
+      let img = null, blob = null;
+      D.step = 'LẤY KHUNG';
+      if(blobs){ if(blobs[k]){ blob = blobs[k]; try{ img = await decode(blob); }catch(e){ D.steps.push('khung ' + (k + 1) + ' không mở lại được'); } } }
+      else if(await seekTo(v, Math.min(dur - 0.02, picked[k].t + 0.005))) img = grabFrame(v);
+      if(!img) continue;
+      D.step = 'ĐẾM KHUNG ' + (k + 1); const t0 = performance.now();
       const res = await countImage(img, (a, n) => busy(true, txt + ` – phần ${a}/${n}…`, base + 0.75 / picked.length * (a - 1) / n));
-      const blob = await new Promise(r => img.toBlob(r, 'image/jpeg', 0.92));
+      if(!blob) blob = await new Promise(r => img.toBlob(r, 'image/jpeg', 0.92));
       const it = makeItem(blob || file, img, res, performance.now() - t0);
-      it.img = null; it.vt = picked[k].t; it.sharp = picked[k].sharp; it.n0 = it.total;
+      it.img = null; img.width = img.height = 0;                   // trả bộ nhớ khung hình ngay (iPhone giới hạn tổng bộ nhớ canvas)
+      it.vt = picked[k].t; it.sharp = picked[k].sharp; it.n0 = it.total;
       it.sure0 = it.dets.filter(d => d.s >= it.conf + CONFIG.unsureBand).length;
       frames.push(it); await sleep(0);
     }
-    if(!frames.length) throw new Error('Không lấy được khung hình nào từ video');
+    if(!frames.length) throw new VidErr('LẤY KHUNG', 'tìm được ' + picked.length + ' mốc nét nhưng không lấy được khung nào', HINT.codec);
     const st = settle(frames.map(f => f.n0)); let rep = 0;
     frames.forEach((f, i) => { const a = Math.abs(f.n0 - st.chot), b = Math.abs(frames[rep].n0 - st.chot); if(a < b || (a === b && f.sure0 > frames[rep].sure0)) rep = i; });
-    const vid = { name: file.name || 'video', dur, nCand: cand.length, frames, rep, ...st, msCount: performance.now() - tC, msAll: performance.now() - T0 };
+    const realDur = dur != null ? dur : (cand.length ? cand[cand.length - 1].t : 0);
+    const vid = { name: file.name || 'video', dur: realDur, nCand: cand.length, frames, rep, ...st, path, cut: path === 'phát' && (dur == null || dur > VIDEO.maxPlay + 0.5),
+      diag: '', msCount: performance.now() - tC, msAll: performance.now() - T0 };
+    vid.diag = LAST_DIAG = diagLine(D, null) + ' | kiểu đọc: ' + path;
     frames.forEach((f, i) => { f.vid = vid; f.vi = i; });
     return frames[rep];
-  }finally{ v.removeAttribute('src'); try{ v.load(); }catch(e){} URL.revokeObjectURL(url); }
+  }catch(e){
+    if(!e.step) e.step = D.step; if(!e.hint) e.hint = /memory|bộ nhớ|allocation/i.test(e.message || '') ? HINT.mem : HINT.again;
+    e.diag = LAST_DIAG = diagLine(D, e); throw e;
+  }finally{ if(o) o.close(); store.set('dangDoc', null); }
+}
+/* Hiện lỗi video bằng chữ, đứng yên trên màn hình đầu (không tự tắt) để chụp màn hình gửi lại */
+function showVidErr(err){
+  const c = $('vidErr'); c.classList.remove('hidden');
+  c.innerHTML = `<b style="color:var(--bad,#c62828)">❌ Chưa đọc được clip</b>` +
+    `<div style="margin-top:6px">Hỏng ở bước: <b>${esc(err.step || '?')}</b></div><div>Lý do: ${esc(err.message || String(err))}</div>` +
+    (err.hint ? `<div class="warnbox">👉 ${esc(err.hint)}</div>` : '') +
+    `<p class="hint" style="margin-bottom:4px">Chụp màn hình <b>dòng chẩn đoán</b> dưới đây gửi cho kỹ thuật:</p><div class="diag" id="diagTxt">${esc(err.diag || '')}</div>` +
+    `<button type="button" class="big-btn secondary" id="btnCopyDiag" style="margin-top:8px">Chép dòng chẩn đoán</button>`;
+  $('btnCopyDiag').onclick = () => { try{ navigator.clipboard.writeText(err.diag || '').then(() => toast('Đã chép.'), () => toast('Không chép được – hãy chụp màn hình.')); }catch(e){ toast('Không chép được – hãy chụp màn hình.'); } };
+  show('home'); setTimeout(() => c.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+}
+const esc = s => String(s).replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+/* L6: Safari hay tải lại trang (thiếu bộ nhớ) khi quay về từ camera hoặc khi đang đọc clip -> clip mất. Báo rõ ở lần mở sau. */
+function camFlag(on){ store.set('dangQuay', on ? { t: Date.now() } : null); }
+function checkReload(){
+  const q = store.get('dangQuay', null), d = store.get('dangDoc', null), now = Date.now(), fresh = x => x && x.t && now - x.t < 10 * 60000;
+  store.set('dangQuay', null); store.set('dangDoc', null);
+  if(!fresh(q) && !fresh(d)) return;
+  const c = $('vidErr'); c.classList.remove('hidden');
+  c.innerHTML = `<b style="color:var(--bad,#c62828)">⚠ Lần trước trang bị tải lại ${fresh(d) ? 'khi đang đọc clip' : 'khi quay về từ camera'} nên clip đã mất</b>` +
+    `<div class="warnbox">👉 ${HINT.mem} Hoặc quay bằng app Camera của iPhone rồi bấm "Chọn ảnh / video có sẵn". Lịch sử đã lưu không mất.</div>` +
+    `<div class="diag">${esc([BUILD, uaShort(), 'HỎNG Ở: ' + (fresh(d) ? 'TRANG TẢI LẠI KHI ĐỌC CLIP' : 'TRANG TẢI LẠI KHI QUAY VỀ TỪ CAMERA')].join(' | '))}</div>`;
 }
 async function openFrame(j){
   const vid = R && R.vid; if(!vid || vid.frames[j] === R) return;
@@ -690,6 +910,8 @@ function renderVid(){
   c.innerHTML = `<div><b>Video ${vid.dur.toFixed(1)} giây · ${vid.frames.length} khung</b> · số chốt <b>${vid.chot}</b> · đồng thuận <b style="color:var(${vid.agree === 'cao' ? '--ok' : '--warn'})">${vid.agree}</b></div>` +
     `<div class="frames">` + vid.frames.map((f, i) => `<button type="button" data-f="${i}" class="${f === R ? 'on' : ''}${i === vid.rep ? ' rep' : ''}">${f.vt.toFixed(1)} s<b>${f.n0}</b></button>`).join('') + `</div>` +
     (vid.agree === 'cao' ? '' : `<div class="warnbox">⚠ Các khung lệch nhau tới <b>${vid.spread}</b> cọng${vid.frames.length < 3 ? ' (hoặc video quá ngắn, dưới 3 khung)' : ''}. Hãy <b>soát kỹ</b> khung đang mở, hoặc <b>quay lại</b>: giữ máy yên 3–5 giây, gần và đủ sáng.</div>`) +
+    (vid.agree === 'cao' ? `<p class="hint">Các khung khớp nhau <b>chưa chắc là đếm đúng</b> (clip mờ, xa thì cả 8 khung có thể cùng sai) – vẫn phải soát.</p>` : '') +
+    (vid.cut ? `<div class="warnbox">⚠ Clip dài: app chỉ đọc <b>${VIDEO.maxPlay} giây đầu</b>. Nên quay 3–5 giây.</div>` : '') +
     `<p class="hint">Đang mở khung ${R.vt.toFixed(1)} s${R.vi === vid.rep ? ' (khung đại diện, viền xanh)' : ''}. Chạm số của khung khác để mở khung đó. Số được lưu là số của khung đang mở sau khi soát.</p>`;
   c.querySelectorAll('button[data-f]').forEach(b => b.onclick = () => openFrame(+b.dataset.f));
 }
@@ -718,7 +940,7 @@ async function openItem(i){
   $('tbRoi').classList.toggle('hidden', R.mode === 'goblet'); $('roiRow').classList.toggle('hidden', R.mode === 'goblet');
   $('btnRoiToggle').textContent = R.roiOn ? 'Tắt vùng cốc' : 'Bật vùng cốc';
   renderVid();
-  $('timeInfo').textContent = (R.vid ? `Video ${i + 1}/${ITEMS.length} · đếm ${R.vid.frames.length} khung trong ${(R.vid.msCount/1000).toFixed(1)} giây (cả đọc video ${(R.vid.msAll/1000).toFixed(1)} giây) · ${R.W}×${R.H}`
+  $('timeInfo').textContent = (R.vid ? `Video ${i + 1}/${ITEMS.length} · đếm ${R.vid.frames.length} khung trong ${(R.vid.msCount/1000).toFixed(1)} giây (cả đọc video ${(R.vid.msAll/1000).toFixed(1)} giây) · đọc kiểu ${R.vid.path} · ${R.W}×${R.H}`
     : `Ảnh ${i + 1}/${ITEMS.length} · đếm trong ${(R.ms_/1000).toFixed(1)} giây · ${R.W}×${R.H}`) + (R.tiles > 1 ? ` · đã phóng to ${R.tiles} phần` : '') +
     (R.mode === 'goblet' ? ` · chế độ ống chia cốc (${R.cap} liều/cốc)` : '');
   setMode('view'); closeRv(true); recompute(); show('result'); draw();
@@ -927,12 +1149,18 @@ $('inExp').onchange = e => { MODE.exp = Math.max(0, parseInt(e.target.value) || 
 document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => { MODE.m = b.dataset.m; store.set('mode', MODE.m); syncModeUI(); });
 $('inCap').onchange = e => { MODE.cap = Math.max(1, parseInt(e.target.value) || 25); store.set('cap', MODE.cap); };
 $('btnCamera').onclick = () => $('fileCam').click();
-$('btnPick').onclick = () => $('filePick').click();
-$('btnVideo').onclick = () => $('fileVid').click();
-$('fileVid').onchange = e => { const f = Array.from(e.target.files || []); e.target.value = ''; ITEMS = []; processFiles(f); };
+$('btnPick').onclick = () => { $('filePick').value = ''; $('filePick').click(); };
+$('btnVideo').onclick = () => { $('fileVid').value = ''; camFlag(true); $('fileVid').click(); };
+$('fileVid').onchange = e => {                                  // không xoá e.target.value ở đây: iPhone có thể thu hồi file tạm của clip (xoá lúc bấm nút lần sau)
+  camFlag(false); const f = Array.from(e.target.files || []);
+  if(!f.length){ toast('Chưa nhận được clip nào. Nếu iPhone hỏi quyền Camera, hãy bấm Cho phép rồi quay lại.', 6000); return; }
+  ITEMS = []; processFiles(f);
+};
+$('fileVid').addEventListener('cancel', () => { camFlag(false); toast('Đã hủy – chưa có clip. Nếu iPhone hỏi quyền Camera, hãy bấm Cho phép.', 5000); });   // L7
+document.addEventListener('visibilitychange', () => { if(!document.hidden) setTimeout(() => camFlag(false), 5000); });   // trang còn sống khi quay về = không bị tải lại
 $('fileCam').onchange = e => { const f = Array.from(e.target.files || []); e.target.value = ''; ITEMS = []; processFiles(f); };
-$('filePick').onchange = e => { const f = Array.from(e.target.files || []); e.target.value = ''; ITEMS = []; processFiles(f); };
-syncModeUI();
+$('filePick').onchange = e => { const f = Array.from(e.target.files || []); if(!f.length) return; ITEMS = []; processFiles(f); };
+syncModeUI(); checkReload();
 if('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 loadModel();
 </script>
