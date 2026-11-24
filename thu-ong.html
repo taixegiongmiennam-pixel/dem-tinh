@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Đếm Tinh – bản thử đếm theo ống · VL4</title>
+<title>Đếm Tinh – bản thử đếm theo ống · VL4 · DM-2411c</title>
 <meta name="description" content="Đếm cọng tinh trong cốc bằng camera, chạy ngay trên điện thoại">
 <meta name="theme-color" content="#16502e">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -87,7 +87,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
 </head>
 <body>
 <header>
-  <h1>Đếm Tinh <small style="font-size:11px;font-weight:400;opacity:.85;white-space:nowrap">thử ống · VL4</small></h1>
+  <h1>Đếm Tinh <small style="font-size:11px;font-weight:400;opacity:.85;white-space:nowrap">thử ống · VL4 · DM-2411c</small></h1>
   <button id="btnList" type="button" class="hidden">Danh sách</button>
   <button id="btnHistory" type="button">Lịch sử</button>
 </header>
@@ -1563,5 +1563,452 @@ window.addEventListener('load', () => { setTimeout(traLaiNgoaiTuyen, 2500); setT
 window.addEventListener('pagehide', traLaiNgoaiTuyen);
 loadModel();
 </script>
+<!-- DM-BEGIN: chế độ Dạy máy (nguồn: day-may/ma/dm.js) -->
+<script>
+/* ===== CHẾ ĐỘ "DẠY MÁY" – gắn thêm vào trang thử thu-ong.html (không sửa mã đếm có sẵn) =====
+   Người dùng báo số ống, tổng cọng, màu -> app tự chấm -> sửa chấm ống lệch -> lưu "gói dạy máy" trong máy -> xuất zip (bảng chia sẻ).
+   Định dạng gói: day-may\DINH-DANG-GOI.md (bản 1). Không gửi dữ liệu đi đâu ngoài file người dùng tự xuất. */
+(function(){
+'use strict';
+const DM_BAN = 'DM-2411c';
+const MAUS = ['trắng', 'vàng', 'cam', 'đỏ', 'xanh lá', 'xanh dương', 'nâu cafe', 'khác'];
+const DM = { on: !!store.get('dmOn', false), file: null, W0: 0, H0: 0, ma: '', maXuat: false, kyLuu: '', mayOng: null, in: null, nhac: '', files: {}, mem: {}, idbHong: false, khoiPhuc: false };
+window.__dm = DM;
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const mauMay = m => m === 'nâu' ? 'nâu cafe' : (MAUS.indexOf(m) >= 0 ? m : 'khác');
+const so = v => { const n = parseInt(v, 10); return isFinite(n) && n >= 0 ? n : null; };
+const soSai = (v, max) => { const t = String(v == null ? '' : v).trim(); return t !== '' && (!/^\d+$/.test(t) || parseInt(t, 10) > max); };
+const demOng = o => o.dots ? tubeCount(o) : 0;
+function ky(){ return JSON.stringify([DM.in, OG.ong.map(o => [o.id, Math.round(o.x), Math.round(o.y), Math.round(o.r), o.dmN == null ? '' : o.dmN, o.dmMau || '', o.nguoi ? 1 : 0, (o.dots || []).map((d, i) => d.removed ? 'r' + i : d.manual ? 'm' + Math.round(d.x) + ',' + Math.round(d.y) : d.confirmed ? 'c' + i : '').join('')])]); }
+const sauLuu = () => !!DM.luuLuc && ky() !== DM.kyLuu;
+const chuaLuu = () => DM.on && !!OG.img && (OG.phase === 'ketqua' ? (!DM.luuLuc || sauLuu()) : sauLuu());
+const daXuatMa = ma => !!ma && store.get('dmDaXuat', []).indexOf(ma) >= 0;
+const inMoi = () => ({ ten: '', soOng: '', tong: '', mau: [{ mau: '', n: '' }] });
+DM.in = inMoi();
+
+/* ---------- kho trong máy (IndexedDB; hỏng thì giữ tạm trong bộ nhớ và báo) ---------- */
+let _db = null;
+function db(){ return _db || (_db = new Promise((res, rej) => { let r; try{ r = indexedDB.open('demtinh-daymay', 1); }catch(e){ rej(e); return; }
+  r.onupgradeneeded = () => { const d = r.result; if(!d.objectStoreNames.contains('goi')) d.createObjectStore('goi', { keyPath: 'ma' }); if(!d.objectStoreNames.contains('nhap')) d.createObjectStore('nhap', { keyPath: 'k' }); };
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('bị chặn')); })); }
+async function idb(st, mode, fn){
+  try{ const d = await db(); return await new Promise((res, rej) => { const tx = d.transaction(st, mode), rq = fn(tx.objectStore(st)); tx.oncomplete = () => res(rq ? rq.result : undefined); tx.onerror = tx.onabort = () => rej(tx.error || new Error('lỗi kho')); }); }
+  catch(e){ if(!DM.idbHong){ DM.idbHong = true; console.error('IndexedDB', e); } throw e; }
+}
+async function khoGhi(st, v){ try{ await idb(st, 'readwrite', s => s.put(v)); return true; }catch(e){ DM.mem[st + ':' + (v.ma || v.k)] = v; return false; } }
+async function khoXoa(st, k){ delete DM.mem[st + ':' + k]; try{ await idb(st, 'readwrite', s => s.delete(k)); }catch(e){} }
+async function khoLay(st, k){ try{ const v = await idb(st, 'readonly', s => s.get(k)); if(v) return v; }catch(e){} return DM.mem[st + ':' + k] || null; }
+async function khoHet(st){ let L = []; try{ L = await idb(st, 'readonly', s => s.getAll()) || []; }catch(e){}
+  for(const k in DM.mem) if(k.indexOf(st + ':') === 0 && !L.some(x => (x.ma || x.k) === (DM.mem[k].ma || DM.mem[k].k))) L.push(DM.mem[k]); return L; }
+
+/* ---------- zip không nén (stored) + CRC32 ---------- */
+const CRC_T = (() => { const t = new Uint32Array(256); for(let n = 0; n < 256; n++){ let c = n; for(let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u){ let c = 0xFFFFFFFF; for(let i = 0; i < u.length; i++) c = CRC_T[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipStore(files, d){
+  const enc = new TextEncoder(), parts = [], cen = []; let off = 0, cs = 0;
+  const dt = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(), tm = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  for(const f of files){ const nm = enc.encode(f.name), crc = crc32(f.data), n = f.data.length;
+    const a = new DataView(new ArrayBuffer(30)); a.setUint32(0, 0x04034b50, true); a.setUint16(4, 20, true); a.setUint16(6, 0x0800, true); a.setUint16(10, tm, true); a.setUint16(12, dt, true);
+    a.setUint32(14, crc, true); a.setUint32(18, n, true); a.setUint32(22, n, true); a.setUint16(26, nm.length, true);
+    parts.push(a.buffer, nm, f.data);
+    const c = new DataView(new ArrayBuffer(46)); c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(12, tm, true); c.setUint16(14, dt, true);
+    c.setUint32(16, crc, true); c.setUint32(20, n, true); c.setUint32(24, n, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    cen.push(c.buffer, nm); cs += 46 + nm.length; off += 30 + nm.length + n; }
+  const e = new DataView(new ArrayBuffer(22)); e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, cs, true); e.setUint32(16, off, true);
+  return new Blob(parts.concat(cen, [e.buffer]), { type: 'application/zip' });
+}
+async function sha256Hex(buf){ try{ if(!(window.crypto && crypto.subtle)) return ''; const h = new Uint8Array(await crypto.subtle.digest('SHA-256', buf)); return Array.from(h).map(b => b.toString(16).padStart(2, '0')).join(''); }catch(e){ return ''; } }
+const p2 = n => String(n).padStart(2, '0');
+function iso(d){ const o = -d.getTimezoneOffset(), s = o >= 0 ? '+' : '-', a = Math.abs(o); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}${s}${p2(Math.floor(a / 60))}:${p2(a % 60)}`; }
+const gioNgan = t => { const d = new Date(t); return `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+function tenGon(s){ return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'gao'; }
+
+/* ---------- giao diện: chèn thêm, không đụng phần có sẵn ---------- */
+const css = document.createElement('style');
+css.textContent = `.row select{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:16px;background:var(--bg);color:var(--ink)}
+#dmCard{border:2px solid var(--brand-2)} #dmCard table,#dm table{width:100%;border-collapse:collapse;font-size:14px;margin-top:6px} #dmCard td,#dmCard th,#dm td,#dm th{border-bottom:1px solid var(--line);padding:5px 4px;text-align:right} #dmCard td:first-child,#dmCard th:first-child,#dm td:first-child,#dm th:first-child{text-align:left}
+.dmOk{color:#12a14a;font-weight:700} .dmSai{color:#d23b3b;font-weight:700} #dmKl{font-size:19px;font-weight:800;margin:8px 0 2px} .dmGoi{border-top:1px solid var(--line);padding:8px 0}
+.dmBtn{border:2px solid #d23b3b;background:var(--card);color:var(--ink);border-radius:10px;padding:8px 10px;font-size:15px;font-weight:700;min-width:64px}`;
+document.head.appendChild(css);
+function them(html, cha, truoc){ const t = document.createElement('template'); t.innerHTML = html.trim(); const el = t.content.firstElementChild; cha.insertBefore(el, truoc || null); return el; }
+them(`<div id="dmHomeBox"><div class="row"><button type="button" id="dmToggle" style="flex:1;padding:12px 4px"></button></div>
+  <div id="dmHome" class="hidden"><p class="hint" style="margin:4px 0">Dạy máy: chụp gáo → nhập <b>số ống, tổng cọng, màu</b> → app tự chấm → anh sửa chấm ở ống lệch → <b>Lưu gói</b> → <b>Xuất</b> vào Google Drive (thư mục DEM-TINH-DAY-MAY). Dùng <b>ảnh gốc</b>, mỗi lần một gáo.</p>
+  <div id="dmDo"></div>
+  <div class="row"><button type="button" id="dmBtnGoi" style="flex:2;padding:12px 4px"></button><button type="button" id="dmBtnDiem" style="flex:1;padding:12px 4px">Bảng điểm</button></div></div></div>`, $('tubeRow'));
+const ongSec = $('ong');
+them(`<div class="card hidden" id="dmCard">
+  <b>DẠY MÁY – anh báo số thật của gáo này</b>
+  <div class="row"><label for="dmTen">Tên gáo / bình</label><input type="text" id="dmTen" placeholder="vd B04-3T" autocomplete="off"></div>
+  <div class="row"><label for="dmSoOng">Số ống</label><input type="number" id="dmSoOng" min="1" max="200" inputmode="numeric" placeholder="vd 36"><label for="dmTong">Tổng cọng</label><input type="number" id="dmTong" min="0" max="20000" inputmode="numeric" placeholder="vd 900"></div>
+  <div id="dmMauList"></div>
+  <div class="row"><button type="button" id="dmThemMau" style="flex:1">+ Thêm màu (gáo nhiều màu)</button></div>
+  <p class="hint" style="margin:2px 0">Mỗi ống mặc định <b id="dmCapTxt">25</b> cọng. Ống nào khác: sau khi đếm, <b>chạm vào ống</b> rồi nhập số thật của ống đó.</p>
+  <div id="dmCham"></div>
+  <div id="dmKD" class="hidden"><div class="row"><button type="button" id="dmLuuKD" style="flex:1;padding:12px 4px;font-size:15px;border:2px solid var(--brand-2)">Lưu gói: MÁY KHÔNG ĐẾM ĐƯỢC gáo này</button></div><p class="hint" id="dmKDTt" style="margin:0"></p></div>
+  <div id="dmNut" class="hidden"><div class="row"><button type="button" id="dmLuu" class="primary" style="flex:1;padding:14px 4px;font-size:16px">Lưu gói dạy máy</button></div><p class="hint" id="dmLuuTt" style="margin:0"></p></div>
+</div>`, ongSec, $('ongView'));
+const tdRow = $('tdOk').parentElement;
+them(`<div id="dmTd" class="card hidden" style="padding:10px;margin:0 0 8px;border:2px solid var(--brand-2)">
+  <label for="dmTdN" style="display:block;margin:0 0 6px"><b>Số THẬT của ống này</b> <small>(gõ số hoặc bấm −/+)</small></label>
+  <div class="row" style="margin:0;flex-wrap:nowrap"><button type="button" id="dmTdM" style="width:46px;font-size:20px">−</button><input type="number" id="dmTdN" min="0" max="200" inputmode="numeric" aria-label="Số thật của ống này (gõ được)" style="flex:0 0 76px;width:76px;min-width:0;font-size:22px;font-weight:800;text-align:center;padding:6px 2px"><button type="button" id="dmTdP" style="width:46px;font-size:20px">+</button><button type="button" id="dmTdC" style="flex:1"></button></div>
+  <div class="row hidden" id="dmTdMauRow" style="margin:8px 0 0"><label for="dmTdMau">Màu ống này</label><select id="dmTdMau"></select></div>
+  <div id="dmTdTt" style="margin:6px 0 0;font-size:15px;font-weight:700"></div>
+</div>`, tdRow.parentElement, tdRow);
+them(`<section id="dm" class="hidden">
+  <div class="card"><div class="row" style="margin-top:0"><b style="flex:1;font-size:17px">Gói dạy máy</b><button type="button" id="dmBack" style="padding:10px 14px">Quay lại</button></div>
+    <p class="hint" id="dmTinh"></p>
+    <div class="row"><button type="button" id="dmXuat" class="primary" style="flex:1;padding:14px 4px;font-size:16px"></button></div>
+    <p class="hint">Bấm Xuất → bảng chia sẻ hiện ra → chọn <b>Drive</b> (hoặc <b>Lưu vào Tệp</b> → Google Drive) → thư mục <b>DEM-TINH-DAY-MAY</b> → Tải lên / Lưu. Gói chỉ rời máy khi anh tự xuất.</p>
+    <div id="dmDs"></div>
+    <div class="row"><button type="button" id="dmXoaXuat" style="flex:1">Xóa khỏi máy các gói ĐÃ xuất</button></div>
+    <p class="hint" style="margin:2px 0">Chỉ xóa sau khi anh đã <b>thấy file zip nằm trong Drive</b> (thư mục DEM-TINH-DAY-MAY). Sửa thêm một gáo đã xuất rồi lưu lại → app tạo <b>gói mới</b>, nhớ xuất gói mới đó.</p>
+  </div>
+  <div class="card" id="dmDiemCard"><b style="font-size:17px">Bảng điểm</b><p class="hint" style="margin:4px 0">Mỗi dòng: trong các gáo anh dạy ngày đó, <b>máy tự đếm khớp số anh nhập</b> ở bao nhiêu ống (trước khi anh sửa chấm). Tỷ lệ tăng dần = máy khá lên.</p><div id="dmDiem"></div></div>
+</section>`, document.querySelector('main'));
+
+/* ---------- số nhập / màu của từng ống ---------- */
+const cap = () => OG.cap || 25;
+const nhapOng = o => o.dmN != null ? o.dmN : cap();
+const mauNhap = () => DM.in.mau.map(m => m.mau).filter(Boolean);
+function mauOng(o){ const C = mauNhap(); if(o.dmMau && (C.indexOf(o.dmMau) >= 0 || !C.length)) return o.dmMau; if(C.length === 1) return C[0]; const mm = mauMay(o.mau); return C.indexOf(mm) >= 0 ? mm : (C[0] || mm); }
+const daSua = o => !!(o.dots && o.dots.some(d => d.removed || d.manual || d.confirmed));
+const coNghi = o => !!(o.dots && o.dots.some(d => !d.removed && !d.manual && !d.confirmed && d.st !== 'sure'));
+function tongMauNhap(){ const M = DM.in.mau.filter(m => m.mau); if(M.length === 1 && M[0].n === '') return so(DM.in.tong); let s = 0; for(const m of M){ const v = so(m.n); if(v == null) return null; s += v; } return M.length ? s : null; }
+function mauDs(){ const M = DM.in.mau.filter(m => m.mau), T = so(DM.in.tong); return M.map(m => ({ mau: m.mau, so_cong: (M.length === 1 && m.n === '') ? (T || 0) : (so(m.n) || 0) })); }
+
+/* ---------- vẽ ô nhập màu ---------- */
+function veMauList(){
+  const L = $('dmMauList'), nhieu = DM.in.mau.length > 1; L.innerHTML = '';
+  DM.in.mau.forEach((m, i) => {
+    const r = them(`<div class="row"><label>${nhieu ? 'Màu ' + (i + 1) : 'Màu cọng'}</label><select class="dmMauS" aria-label="Màu cọng ${i + 1}"><option value="">— chọn màu —</option>${MAUS.map(x => `<option${x === m.mau ? ' selected' : ''}>${x}</option>`).join('')}</select>` +
+      (nhieu ? `<input type="number" class="dmMauN" min="0" max="20000" inputmode="numeric" placeholder="số cọng" value="${esc(m.n)}" style="max-width:96px" aria-label="Số cọng màu ${i + 1}"><button type="button" class="dmMauX" style="width:40px" aria-label="Bỏ màu ${i + 1}">✕</button>` : '') + `</div>`, L);
+    r.querySelector('.dmMauS').onchange = e => { m.mau = e.target.value; dmDoi(); };
+    if(nhieu){ r.querySelector('.dmMauN').oninput = e => { m.n = e.target.value; dmDoi(); }; r.querySelector('.dmMauX').onclick = () => { DM.in.mau.splice(i, 1); if(DM.in.mau.length === 1) DM.in.mau[0].n = ''; veMauList(); dmDoi(); }; }
+  });
+}
+$('dmThemMau').onclick = () => { if(DM.in.mau.length >= 8) return; DM.in.mau.push({ mau: '', n: '' }); veMauList(); dmDoi(); };
+$('dmTen').oninput = e => { DM.in.ten = e.target.value; dmDoi(true); };
+$('dmSoOng').oninput = e => { DM.in.soOng = e.target.value; const v = so(e.target.value); OG.exp = v || 0; if(OG.img) ongCapNhat(); else dmDoi(); };
+$('dmTong').oninput = e => { DM.in.tong = e.target.value; dmDoi(); };
+function dmDoi(nhe){ DM.nhac = ''; if(!nhe) dmVe(); nhapHen(); }
+function ganIn(){ $('dmTen').value = DM.in.ten; $('dmSoOng').value = DM.in.soOng; $('dmTong').value = DM.in.tong; veMauList(); }
+
+/* ---------- TỰ CHẤM ---------- */
+function cham(kd){
+  const O = kd ? OG.ong : OG.ong.filter(o => o.dots), n = OG.ong.length, CM = mauNhap(), T = so(DM.in.tong), S = so(DM.in.soOng);
+  const K = { n, soOngNhap: S, tongNhap: T, mayOng: DM.mayOng, tongMay: 0, tongNay: 0, tongOngNhap: 0, khopMay: 0, lech: [], sua: 0, mau: {}, nghi: [], mauLa: [] };
+  for(const o of O){ const nh = nhapOng(o), c = demOng(o), m = kd ? 0 : (o.nMay != null ? o.nMay : c), mu = mauOng(o);
+    if(!kd && c === nh && !daSua(o) && coNghi(o) && !o.nguoi) K.nghi.push(o);
+    if(!kd && CM.length > 1 && !(o.dmMau && CM.indexOf(o.dmMau) >= 0) && CM.indexOf(mauMay(o.mau)) < 0) K.mauLa.push(o);
+    K.tongMay += m; K.tongNay += c; K.tongOngNhap += nh; if(m === nh) K.khopMay++; if(c !== nh) K.lech.push(o); if(daSua(o)) K.sua++;
+    const q = K.mau[mu] || (K.mau[mu] = { ong: 0, khop: 0, nhapOng: 0, may: 0, nay: 0 }); q.ong++; if(m === nh) q.khop++; q.nhapOng += nh; q.may += m; q.nay += c; }
+  K.tongMau = tongMauNhap();
+  K.khopSoOng = S != null && S === n; K.khopTongOng = T != null && T === K.tongOngNhap; K.khopTongMau = T != null && K.tongMau != null && T === K.tongMau;
+  return K;
+}
+const CMau0 = () => mauNhap()[0] || '';
+function loiSo(){ const L = [];
+  if(soSai(DM.in.soOng, 200) || (String(DM.in.soOng).trim() !== '' && so(DM.in.soOng) < 1)) L.push('<b>Số ống</b> phải là số nguyên từ 1 đến 200.');
+  if(soSai(DM.in.tong, 20000)) L.push('<b>Tổng cọng</b> phải là số nguyên từ 0 đến 20000.');
+  if(DM.in.mau.some(m => soSai(m.n, 20000))) L.push('<b>Số cọng từng màu</b> phải là số nguyên từ 0 đến 20000.');
+  return L; }
+const dau = ok => ok ? '<span class="dmOk">✓</span>' : '<span class="dmSai">✗</span>';
+function dmVe(){
+  const hien = DM.on && !!OG.img; $('dmCard').classList.toggle('hidden', !hien); if(!hien) return;
+  $('dmCapTxt').textContent = cap();
+  const kq = OG.phase === 'ketqua', box = t => `<div class="warnbox">${t}</div>`, S = so(DM.in.soOng), T = so(DM.in.tong); let h = '';
+  $('dmThemMau').classList.toggle('hidden', DM.in.mau.length >= 8);
+  const LS = loiSo(); if(LS.length) h += box(`${dau(false)} ` + LS.join(' '));
+  $('ongLuu').textContent = 'Lưu vào lịch sử đếm';
+  if(!kq){
+    const B = ongKiem(), kd = !!OG.chanSau && B.length === 1;
+    $('dmKD').classList.toggle('hidden', !kd);
+    if(B.length && !kd){ h += `<p class="hint" style="margin:4px 0"><b>Ảnh này chưa dùng để dạy được.</b> Làm theo dòng <b>Chụp lại</b> ở phía trên, hoặc bấm <b>Ảnh khác</b> để chọn ảnh khác.</p>`; $('dmNut').classList.add('hidden'); $('dmCham').innerHTML = h; return; }
+    if(kd){ h += box(`<b>Máy KHÔNG đếm được gáo này</b> (thường là màu cọng máy chưa học). Nếu ảnh rõ, đúng là gáo, vòng ống đã đúng: nhập đủ số ống, tổng cọng, màu rồi bấm nút <b>Lưu gói: MÁY KHÔNG ĐẾM ĐƯỢC</b> bên dưới – gói này để máy tính chấm điểm và gán nhãn sau. Ảnh mờ / khói dày thì chụp lại.`);
+      $('dmKDTt').textContent = DM.luuLuc ? `Đã lưu gói lúc ${gioNgan(DM.luuLuc)}${sauLuu() ? ' – có thay đổi sau đó, bấm Lưu lại' : ''}. Xuất ở màn hình đầu → Gói dạy máy.` : 'Gói kiểu này chỉ có ảnh, vòng ống và số anh nhập (không có chấm).'; }
+    const thieu = []; if(S == null || S < 1) thieu.push('số ống'); if(T == null) thieu.push('tổng cọng'); if(!mauNhap().length) thieu.push('màu');
+    if(thieu.length) h += `<p class="hint" style="margin:4px 0">Còn thiếu: <b>${thieu.join(', ')}</b>. ${kd ? 'Nhập xong rồi bấm nút <b>Lưu gói: MÁY KHÔNG ĐẾM ĐƯỢC</b>.' : 'Nhập xong rồi bấm <b>Đếm cọng từng ống</b>.'}</p>`;
+    if(DM.nhac && kd) h += `<div class="warnbox" id="dmNhac" style="background:#fde3e3;color:#8a1c1c;border-color:#f1a3a3">${DM.nhac}</div>`;
+    if(S != null && S >= 1 && !OG.loiKhoanh) h += S === OG.ong.length ? `<p class="hint" style="margin:4px 0">${dau(true)} Số ống khớp: máy đang khoanh <b>${OG.ong.length}</b> ống.</p>`
+      : box(`${dau(false)} Anh nhập <b>${S}</b> ống, máy đang khoanh <b>${OG.ong.length}</b>. Bấm <b>Thêm</b> rồi chạm ống bị sót, hoặc <b>Xóa</b> vòng thừa, cho tới khi bằng nhau rồi mới đếm.`);
+    $('dmNut').classList.add('hidden');
+  }else{
+    $('dmKD').classList.add('hidden');
+    const K = cham(), con = K.lech.length, daSuaKhop = OG.ong.filter(o => o.dots && daSua(o) && tubeCount(o) === nhapOng(o)).length;
+    h += `<div id="dmKl" class="${con ? 'dmSai' : 'dmOk'}">Máy khớp ${K.khopMay}/${K.n} ống; lệch ${K.n - K.khopMay} ống</div>`;
+    if(K.n - K.khopMay) h += `<div class="hint" style="margin:0 0 4px">Anh đã sửa khớp <b id="dmDaSua">${daSuaKhop}</b> ống · còn <b id="dmCon">${con}</b> ống lệch chưa sửa xong.</div>`;
+    h += `<table><tr><th></th><th>Máy</th><th>Anh nhập</th><th></th></tr>` +
+      `<tr><td>Tổng cọng</td><td id="dmTongMay">${K.tongMay}${K.tongNay !== K.tongMay ? ` → ${K.tongNay}` : ''}</td><td>${T == null ? '—' : T}</td><td>${T == null ? '' : dau(K.tongNay === T)}</td></tr>` +
+      `<tr><td>Số ống</td><td>${K.mayOng != null && K.mayOng !== K.n ? K.mayOng + ' → ' + K.n : K.n}</td><td>${S == null ? '—' : S}</td><td>${S == null ? '' : dau(K.khopSoOng)}</td></tr></table>`;
+    const C = mauDs();
+    if(C.length){ h += `<table><tr><th>Theo màu</th><th>Máy đếm</th><th>Cộng số ống</th><th>Anh nhập</th><th></th></tr>`;
+      const ten = C.map(c => c.mau).concat(Object.keys(K.mau).filter(m => !C.some(c => c.mau === m)));
+      for(const m of ten){ const q = K.mau[m] || { nay: 0, nhapOng: 0, ong: 0 }, c = C.find(x => x.mau === m);
+        h += `<tr><td>${esc(m)} <small>(${q.ong} ống)</small></td><td>${q.nay}</td><td>${q.nhapOng}</td><td>${c ? c.so_cong : '—'}</td><td>${c ? dau(c.so_cong === q.nhapOng) : ''}</td></tr>`; }
+      h += `</table>`; }
+    if(T != null && K.tongMau != null && T !== K.tongMau) h += box(`${dau(false)} Tổng anh nhập <b>${T}</b> nhưng cộng các màu là <b>${K.tongMau}</b>. Sửa lại một trong hai (phải bằng nhau mới lưu được).`);
+    if(S != null && !K.khopSoOng) h += box(`${dau(false)} Anh nhập <b>${S}</b> ống nhưng đang có <b>${K.n}</b> vòng ống. Bấm <b>Sửa vòng ống</b> để thêm/xóa vòng, hoặc sửa lại số ống.`);
+    if(T != null && !K.khopTongOng) h += box(`${dau(false)} Tổng anh nhập <b>${T}</b> nhưng cộng số từng ống là <b>${K.tongOngNhap}</b> (${K.n} ống, mặc định ${cap()}/ống). <b>Chạm vào ống không đủ ${cap()}</b> rồi nhập số thật của ống đó.`);
+    if(C.length > 1 && C.some(c => (K.mau[c.mau] || { nhapOng: 0 }).nhapOng !== c.so_cong)) h += `<p class="hint" style="margin:4px 0">Theo màu chưa khớp: chạm ống rồi chọn lại <b>Màu ống này</b> (máy đoán màu có thể sai). Ống lẫn 2 màu: chọn màu chính, phần theo màu sẽ lệch – vẫn lưu được.</p>`;
+    if(K.mauLa.length) h += `<div style="margin-top:8px"><b>${K.mauLa.length} ống máy thấy màu không có trong danh sách anh nhập</b> <span class="hint">– đang tạm tính vào màu «${esc(CMau0())}». Chạm ống để chọn đúng màu:</span><div id="dmMauLa" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">` + K.mauLa.map(o => `<button type="button" class="dmBtn" style="border-color:#b98a00" data-id="${o.id}">#${o.id}</button>`).join('') + `</div></div>`;
+    if(con) h += `<div style="margin-top:8px"><b>Ống lệch (số chấm khác số anh nhập) – chạm để sửa chấm</b><div id="dmLech" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">` + K.lech.map(o => `<button type="button" class="dmBtn" data-id="${o.id}">#${o.id}: ${tubeCount(o)}/${nhapOng(o)}</button>`).join('') + `</div></div>`;
+    else h += `<p class="hint dmOk" style="margin:6px 0">Mọi ống đã bằng số anh nhập.</p>`;
+    if(K.nghi.length) h += `<div style="margin-top:8px"><b>${K.nghi.length} ống khớp số nhưng còn chấm máy chưa chắc</b> <span class="hint">– không bắt buộc: chạm ống, xem chấm đúng thì bấm <b>Xác nhận ống này</b>; có xác nhận thì ống mới thành bài học cho máy.</span><div id="dmNghi" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">` + K.nghi.map(o => `<button type="button" class="dmBtn" style="border-color:#b98a00" data-id="${o.id}">#${o.id}</button>`).join('') + `</div></div>`;
+    h += `<p class="hint" style="margin:6px 0 0">Nút <b>Lưu gói dạy máy</b> (dưới đây) là để dạy máy. Nút «Lưu vào lịch sử đếm» ở cuối trang chỉ ghi lịch sử, không tạo gói.</p>`;
+    if(DM.nhac) h += `<div class="warnbox" id="dmNhac" style="background:#fde3e3;color:#8a1c1c;border-color:#f1a3a3">${DM.nhac}</div>`;
+    $('dmNut').classList.remove('hidden');
+    $('dmLuuTt').textContent = DM.luuLuc ? `Đã lưu gói lúc ${gioNgan(DM.luuLuc)}${sauLuu() ? ' – có thay đổi sau đó, bấm Lưu lại' : ''}. Xuất ở màn hình đầu → Gói dạy máy.` : 'Lưu xong, gói nằm trong máy cho tới khi anh xuất.';
+  }
+  $('dmCham').innerHTML = h;
+}
+$('dmCham').addEventListener('click', ev => { const b = ev.target.closest('button[data-id]'); if(b) tubeMo(parseInt(b.dataset.id, 10)); });
+
+/* ---------- màn hình một ống: số thật + màu ---------- */
+function dmTdVe(){
+  const o = TD.o, hien = DM.on && !!o; $('dmTd').classList.toggle('hidden', !hien); if(!hien) return;
+  const nh = nhapOng(o), c = tubeCount(o), m = o.nMay != null ? o.nMay : c, C = mauNhap();
+  if(document.activeElement !== $('dmTdN')) $('dmTdN').value = nh;
+  $('dmTdC').textContent = `Về ${cap()}`; $('dmTdC').style.visibility = nh === cap() ? 'hidden' : 'visible';
+  $('dmTdMauRow').classList.toggle('hidden', C.length < 2);
+  if(C.length >= 2){ const cur = mauOng(o); $('dmTdMau').innerHTML = C.map(x => `<option${x === cur ? ' selected' : ''}>${x}</option>`).join(''); }
+  const d = c - nh;
+  if(tdQua){ $('dmTdTt').innerHTML = `<span class="dmSai">Số thật của một ống phải là số nguyên từ 0 đến 200 – chưa nhận số vừa gõ, đang giữ ${nh}.</span>`; return; }
+  $('dmTdTt').innerHTML = `Máy đếm ${m} · đang chấm ${c} · số thật ${nh} → ` + (d === 0 ? `<span class="dmOk">KHỚP ✓${daSua(o) ? ' (anh đã sửa)' : ''}</span>` : `<span class="dmSai">${d > 0 ? 'THỪA ' + d + ' chấm – chạm chấm sai để bỏ' : 'THIẾU ' + (-d) + ' chấm – chạm cọng bị sót để thêm'}</span>`);
+}
+function dmTdDat(v){ const o = TD.o; if(!o) return; v = Math.max(0, Math.min(200, v)); o.dmN = v === cap() ? undefined : v; daDoi(); dmTdVe(); }
+let tdTruoc = null, tdQua = false;      // gõ số: chạm vào ô là ô trống để gõ số mới (không nối vào số cũ); xóa hết = giữ số trước khi chạm; quá 200 thì báo, không nhận
+$('dmTdN').onfocus = e => { if(!TD.o) return; tdTruoc = nhapOng(TD.o); tdQua = false; e.target.placeholder = String(tdTruoc); e.target.value = ''; };
+$('dmTdN').oninput = e => { if(!TD.o || tdTruoc == null) return; const t = e.target.value.trim(); tdQua = false;
+  if(t === '') dmTdDat(tdTruoc); else if(/^\d+$/.test(t) && parseInt(t, 10) <= 200) dmTdDat(parseInt(t, 10)); else { tdQua = true; dmTdDat(tdTruoc); } };
+$('dmTdN').onblur = e => { tdTruoc = null; tdQua = false; e.target.value = TD.o ? nhapOng(TD.o) : ''; if(TD.o) dmTdVe(); };
+$('dmTdM').onclick = () => { $('dmTdN').blur(); if(TD.o) dmTdDat(nhapOng(TD.o) - 1); }; $('dmTdP').onclick = () => { $('dmTdN').blur(); if(TD.o) dmTdDat(nhapOng(TD.o) + 1); }; $('dmTdC').onclick = () => dmTdDat(cap());
+$('dmTdMau').onchange = e => { if(TD.o){ TD.o.dmMau = e.target.value; daDoi(); dmTdVe(); } };
+function daDoi(){ DM.nhac = ''; clearTimeout(nhapT); nhapLuu(); }      // ghi ngay (không chờ) để đóng trang liền sau khi bấm vẫn không mất
+
+/* ---------- dựng gói ---------- */
+function dungMeta(ma, luc, buf, sha, kd, maCu){
+  const s = DM.W0 / OG.img.width, r1 = v => Math.round(v * s * 10) / 10, K = cham(kd), ten = DM.in.ten.trim();
+  const ext = (/\.(png|heic|heif|webp)$/i.exec(DM.file.name || '') || [])[1], tenAnh = 'anh.' + (ext ? ext.toLowerCase() : (/png/.test(DM.file.type) ? 'png' : /hei[cf]/.test(DM.file.type) ? 'heic' : /webp/.test(DM.file.type) ? 'webp' : 'jpg'));
+  const theoMau = {}; for(const m in K.mau) theoMau[m] = K.mau[m].may;
+  const kl = kd ? `Máy KHÔNG đếm được gáo này (không nhận ra cọng) – gói chỉ có ảnh, vòng ống và số người nhập` : `Máy khớp ${K.khopMay}/${K.n} ống; lệch ${K.n - K.khopMay} ống` + (K.n - K.khopMay ? `; sau khi sửa còn ${K.lech.length} ống lệch` : '');
+  const meta = { dinh_dang: 'dem-tinh-goi-day-may', phien_ban_dinh_dang: 1, ma_goi: ma, gia: false, ngay_gio: iso(new Date(luc)), ten_gao: ten,
+    anh: { file: tenAnh, ten_goc: DM.file.name || '', rong: DM.W0, cao: DM.H0, sha256: sha, so_byte: buf.byteLength },
+    nguoi_nhap: { so_ong: so(DM.in.soOng), tong_cong: so(DM.in.tong), so_chuan: cap(), mau: mauDs() },
+    gao: { x: r1(OG.gao.x), y: r1(OG.gao.y), r: r1(OG.gao.r), nguon: OG.gao.nguon || '' }, r_ong_chuan: r1(OG.rOng),
+    may: { khong_dem_duoc: !!kd, do_net: Math.round((OG.sharp || 0) * 10) / 10, so_ong_khoanh: DM.mayOng, tong_cong: K.tongMay, theo_mau: theoMau, co_dau_cong: kd ? 0 : r1(OG.head || 0), anh_lam_viec: OG.img.width + 'x' + OG.img.height },
+    tu_cham: { khop_tong: K.tongNay === K.tongNhap, khop_tong_may: K.tongMay === K.tongNhap, khop_so_ong: K.khopSoOng, khop_tong_voi_ong: K.khopTongOng, khop_tong_voi_mau: K.khopTongMau,
+      ong_khop: K.khopMay, ong_lech: K.n - K.khopMay, ong_da_sua: K.sua, ong_con_lech: K.lech.length, ket_luan: kl },
+    ong: (kd ? OG.ong : OG.ong.filter(o => o.dots)).map(o => { const c = demOng(o), nh = nhapOng(o);
+      const R = { id: o.id, x: r1(o.x), y: r1(o.y), r: r1(o.r), so_nguoi_nhap: nh, mau: mauOng(o), mau_may: kd ? 'khác' : mauMay(o.mau), so_may: kd ? 0 : (o.nMay != null ? o.nMay : c), cac_lan_dem: kd ? [] : (o.n || []),
+        trang_thai: kd ? 'may_khong_dem' : (c === nh ? 'khop' : 'lech'), da_sua: kd ? false : daSua(o), co_cong_nghi: kd ? false : coNghi(o), nguoi_xac_nhan: kd ? false : !!o.nguoi, vong_bat_thuong: !!(o.co && o.co.length),
+        cham: kd ? [] : o.dots.filter(dotOn).map(d => d.manual ? { x: r1(d.x), y: r1(d.y), nguon: 'nguoi' } : { x: r1(d.x), y: r1(d.y), w: r1(d.w), h: r1(d.h), diem: Math.round(d.s * 1000) / 1000, nguon: 'may' }) };
+      if(o.r0) R.r0 = r1(o.r0); return R; }),
+    cong_ngoai_ong: (OG.ngoaiOng || []).filter(d => !d.removed).map(d => ({ x: r1(d.x), y: r1(d.y) })),
+    phien_ban: { app: DM_BAN + ' / thử ống ' + (typeof BAN_THU === 'string' ? BAN_THU : ''), mo_hinh: (CONFIG.model || '') + ' (dem-tinh-v8)' } };
+  if(maCu) meta.thay_cho = maCu;
+  return { meta, K };
+}
+async function dmLuu(kd){
+  kd = kd === true;
+  if(!DM.on || !OG.img || !DM.file) return;
+  if(kd ? !(OG.phase === 'khoanh' && OG.chanSau && ongKiem().length === 1) : OG.phase !== 'ketqua') return;
+  const S = so(DM.in.soOng), T = so(DM.in.tong), K = cham(kd), loi = loiSo();
+  if(S == null || S < 1) loi.push('Chưa nhập <b>số ống</b>.'); if(T == null) loi.push('Chưa nhập <b>tổng số cọng</b>.');
+  if(!mauNhap().length) loi.push('Chưa chọn <b>màu cọng</b>.');
+  if(DM.in.mau.some(m => !m.mau) && DM.in.mau.length > 1) loi.push('Có dòng màu chưa chọn màu – chọn hoặc bấm ✕ để bỏ.');
+  if(new Set(mauNhap()).size !== mauNhap().length) loi.push('Một màu bị nhập hai lần.');
+  if(DM.in.mau.length > 1 && DM.in.mau.some(m => m.mau && so(m.n) == null)) loi.push('Gáo nhiều màu: phải nhập <b>số cọng của từng màu</b>.');
+  if(!loi.length && T !== K.tongMau) loi.push(`Tổng anh nhập <b>${T}</b> khác cộng các màu <b>${K.tongMau}</b>. Sửa cho bằng nhau.`);
+  if(!DM.W0) loi.push('Không đọc được cỡ ảnh gốc – chọn lại ảnh.');
+  if(kd && S != null && S !== K.n) loi.push(`Anh nhập <b>${S}</b> ống nhưng đang có <b>${K.n}</b> vòng ống – thêm/xóa vòng cho bằng nhau (gói kiểu này chỉ có giá trị khi vòng ống đúng).`);
+  const hienNhac = () => { dmVe(); const el = $('dmNhac'); (el || $('dmCard')).scrollIntoView({ block: 'center' }); };
+  if(loi.length){ DM.nhac = '<b>CHƯA LƯU.</b> ' + loi.join(' '); hienNhac(); return; }
+  if(kd && DM.kdHoi !== ky()){ DM.kdHoi = ky(); DM.nhac = `<b>CHƯA LƯU – anh xem lại ảnh:</b> ảnh có <b>RÕ NÉT</b>, không khói, nhìn thấy từng đầu cọng không? Ảnh nhòe/khói thì máy cũng "không đếm được" – ảnh như vậy <b>không dạy được, hãy chụp lại</b>. Ảnh rõ thì <b>bấm nút Lưu lần nữa</b>.`; hienNhac(); return; }
+  const canh = []; if(!K.khopSoOng) canh.push(`số ống nhập ${S} ≠ ${K.n} vòng ống`); if(!K.khopTongOng) canh.push(`tổng nhập ${T} ≠ cộng số từng ống ${K.tongOngNhap}`);
+  const khoa = canh.join('|');
+  if(canh.length && DM.nhacKhoa !== khoa){ DM.nhacKhoa = khoa; DM.nhac = `<b>CHƯA LƯU – số chưa tự khớp:</b> ${canh.join('; ')}. Nên sửa cho khớp (gói không khớp thì máy tính chỉ dùng được các ống anh đã sửa chấm). <b>Bấm nút Lưu lần nữa nếu vẫn muốn lưu.</b>`; hienNhac(); return; }
+  busy(true, 'Đang lưu gói dạy máy…'); await sleep(20);
+  try{
+    const buf = DM.buf || (DM.buf = await DM.file.arrayBuffer()), sha = DM.sha || (DM.sha = await sha256Hex(buf)), luc = Date.now();
+    let maCu = '';
+    if(DM.ma && !DM.maXuat){ const cu = await khoLay('goi', DM.ma); if((cu && cu.xuat) || daXuatMa(DM.ma)) DM.maXuat = true; }     // gói này đã xuất rồi: bản lưu lại phải mang MÃ MỚI, nếu không máy tính coi là trùng và bỏ bản sửa
+    if(!DM.ma || DM.maXuat){ maCu = DM.ma; const d = new Date(luc); DM.ma = `DM-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}-${Math.floor(Math.random() * 65536).toString(16).padStart(4, '0')}`; DM.maXuat = false; }
+    const { meta } = dungMeta(DM.ma, luc, buf, sha, kd, maCu);
+    const tom = { kd, ong: K.n, khop: K.khopMay, con: K.lech.length, sua: K.sua, tong: T, mau: mauDs().map(m => m.mau).join(', '), tuKhop: !canh.length };
+    const ok = await khoGhi('goi', { ma: DM.ma, t: luc, ten: meta.ten_gao, meta, tenAnh: meta.anh.file, buf, type: DM.file.type || 'image/jpeg', xuat: 0, tom });
+    delete DM.files[DM.ma];
+    const D = store.get('dmDiem', []).filter(e => e.ma !== DM.ma && e.ma !== maCu), mau = {}; for(const m in K.mau) mau[m] = [K.mau[m].ong, K.mau[m].khop];
+    D.push({ ma: DM.ma, t: luc, ten: meta.ten_gao, mh: 'v8', ong: K.n, khop: K.khopMay, mau }); store.set('dmDiem', D.slice(-400));
+    DM.luuLuc = luc; DM.kyLuu = ky(); DM.nhac = ''; DM.nhacKhoa = ''; dmVe(); clearTimeout(nhapT); await nhapLuu(); dmDem();
+    toast(ok ? `Đã lưu gói${maCu ? ' MỚI (gói trước đã xuất – nhớ xuất gói mới này)' : ''}: ${kd ? 'máy không đếm được, ' + K.n + ' ống' : kLine(K)}. Xuất ở màn hình đầu → Gói dạy máy.` : 'Máy KHÔNG cho lưu lâu dài (chế độ riêng tư?). Gói chỉ giữ tạm – hãy XUẤT NGAY kẻo mất.', ok ? 4200 : 8000);
+  }catch(e){ console.error(e); toast('Lỗi khi lưu gói: ' + (e.message || e), 6000); }
+  busy(false);
+}
+const kLine = K => `máy khớp ${K.khopMay}/${K.n} ống, còn ${K.lech.length} ống lệch`;
+$('dmLuu').onclick = () => dmLuu(false); $('dmLuuKD').onclick = () => dmLuu(true);
+
+/* ---------- danh sách gói, xuất, bảng điểm ---------- */
+async function dmDem(){ const L = await khoHet('goi'), n = L.filter(g => !g.xuat).length; DM.cho = n; DM.ds = L;
+  $('dmBtnGoi').textContent = n ? `Gói dạy máy · còn ${n} gói chưa xuất` : `Gói dạy máy (${L.length ? 'đã xuất hết' : 'chưa có gói'})`; $('dmBtnGoi').style.borderColor = n ? '#d23b3b' : ''; return L; }
+function tenZip(g){ const d = new Date(g.t); return `DM_${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}_${tenGon(g.ten)}_${g.ma.slice(-4)}.zip`; }
+function fileCua(g){ if(DM.files[g.ma]) return DM.files[g.ma];
+  const z = zipStore([{ name: 'goi.json', data: new TextEncoder().encode(JSON.stringify(g.meta)) }, { name: g.tenAnh, data: new Uint8Array(g.buf) }], new Date(g.t));
+  let f; try{ f = new File([z], tenZip(g), { type: 'application/zip' }); }catch(e){ f = z; f.name = tenZip(g); } return DM.files[g.ma] = f; }
+async function dmMan(){
+  const L = (await dmDem()).sort((a, b) => b.t - a.t), cho = L.filter(g => !g.xuat);
+  for(const g of cho){ try{ fileCua(g); }catch(e){ console.error(e); } }          // dựng sẵn zip để lúc bấm Xuất gọi bảng chia sẻ ngay
+  $('dmTinh').innerHTML = (L.length ? `Trong máy có <b>${L.length}</b> gói · <b id="dmChoN">${cho.length}</b> gói chưa xuất.` : 'Chưa có gói nào. Bật Dạy máy, chụp một gáo, nhập số, đếm, rồi bấm "Lưu gói dạy máy".') + (DM.idbHong ? ' <span class="dmSai">Máy không cho lưu lâu dài – gói sẽ mất khi đóng trang, hãy xuất ngay.</span>' : '');
+  $('dmXuat').textContent = cho.length ? `Xuất ${cho.length} gói chưa xuất` : 'Không còn gói chưa xuất'; $('dmXuat').disabled = !cho.length; $('dmXuat').style.opacity = cho.length ? 1 : .45;
+  $('dmXoaXuat').classList.toggle('hidden', !L.some(g => g.xuat));
+  $('dmDs').innerHTML = L.map(g => `<div class="dmGoi" data-ma="${esc(g.ma)}"><div><b>${esc(g.ten || '(chưa đặt tên)')}</b> · ${gioNgan(g.t)} · ${esc(g.tom.mau)}</div>
+    <div class="hint" style="margin:2px 0">${g.tom.kd ? `<b>Máy không đếm được</b> · ${g.tom.ong} ống` : `Máy khớp ${g.tom.khop}/${g.tom.ong} ống · anh sửa ${g.tom.sua} ống · còn lệch ${g.tom.con}`} · tổng ${g.tom.tong}${g.tom.tuKhop ? '' : ' · <span class="dmSai">số chưa tự khớp</span>'} · ${(g.buf.byteLength / 1048576).toFixed(1)} MB</div>
+    <div class="row" style="margin:4px 0 0"><span style="flex:1" class="${g.xuat ? 'dmOk' : 'dmSai'}">${g.xuat ? 'Đã xuất ' + gioNgan(g.xuat) : 'CHƯA xuất'}</span><button type="button" data-v="xuat" style="padding:8px 12px">${g.xuat ? 'Xuất lại' : 'Xuất riêng'}</button><button type="button" data-v="xoa" style="padding:8px 12px">Xóa</button></div></div>`).join('');
+  veDiem();
+}
+async function dmXuat(ds){
+  if(!ds.length){ toast('Không có gói nào để xuất.'); return; }
+  let files; try{ files = ds.map(fileCua); }catch(e){ toast('Lỗi dựng file zip: ' + (e.message || e), 6000); return; }
+  const xong = async cach => { const t = Date.now(); store.set('dmDaXuat', store.get('dmDaXuat', []).filter(m => !ds.some(g => g.ma === m)).concat(ds.map(g => g.ma)).slice(-300)); for(const g of ds){ g.xuat = t; g.cach = cach; await khoGhi('goi', g); if(g.ma === DM.ma){ DM.maXuat = true; nhapHen(); } } await dmMan(); };
+  const coFile = typeof File === 'function' && files.every(f => f instanceof File);
+  if(coFile && navigator.canShare && navigator.share){
+    let duoc = false; try{ duoc = navigator.canShare({ files }); }catch(e){}
+    if(!duoc && files.length > 1){ toast('Máy này không chia sẻ được nhiều file một lần – hãy bấm "Xuất riêng" từng gói.', 6000); return; }
+    if(duoc){
+      try{ await navigator.share({ files, title: 'Gói dạy máy Đếm Tinh' }); await xong('chia sẻ'); toast(`Đã đưa ${ds.length} gói sang bảng chia sẻ. Kiểm tra trong Drive: thư mục DEM-TINH-DAY-MAY.`, 6000); }
+      catch(e){ if(e && e.name === 'AbortError') toast('Anh đã hủy – gói vẫn giữ trong máy, chưa xuất.', 4000); else { console.error(e); toast('Không mở được bảng chia sẻ (' + (e.message || e) + '). Gói vẫn giữ trong máy. Thử "Xuất riêng" từng gói.', 7000); } }
+      return;
+    }
+  }
+  // máy không có bảng chia sẻ file (máy tính): tải file về
+  for(const f of files){ const a = document.createElement('a'); a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 20000); await sleep(350); }
+  await xong('tải về'); toast(`Máy này không có bảng chia sẻ file: đã TẢI ${ds.length} file zip về máy. Tự chép vào thư mục Drive DEM-TINH-DAY-MAY.`, 7000);
+}
+// Không chờ đọc kho trước khi gọi bảng chia sẻ (iPhone chỉ cho mở bảng chia sẻ NGAY trong lúc bấm): dùng danh sách đã đọc sẵn lúc mở màn hình này.
+$('dmXuat').onclick = () => dmXuat((DM.ds || []).filter(g => !g.xuat).sort((a, b) => a.t - b.t));
+let xoaHoi = '';
+$('dmDs').addEventListener('click', async ev => { const b = ev.target.closest('button[data-v]'); if(!b) return; const ma = b.closest('.dmGoi').dataset.ma, g = (DM.ds || []).find(x => x.ma === ma); if(!g) return;
+  if(b.dataset.v === 'xuat') return dmXuat([g]);
+  if(xoaHoi !== ma){ xoaHoi = ma; b.textContent = g.xuat ? 'Bấm lần nữa để xóa' : 'CHƯA xuất! Bấm nữa để xóa'; b.style.borderColor = '#d23b3b'; setTimeout(() => { if(xoaHoi === ma){ xoaHoi = ''; dmMan(); } }, 4000); return; }
+  xoaHoi = ''; await khoXoa('goi', ma); delete DM.files[ma];
+  if(!g.xuat) store.set('dmDiem', store.get('dmDiem', []).filter(e => e.ma !== ma));           // gói chưa từng xuất (lưu thử / lưu sai): rút luôn khỏi bảng điểm
+  if(DM.ma === ma){ DM.ma = ''; DM.maXuat = false; DM.luuLuc = 0; DM.kyLuu = ''; }
+  toast(g.xuat ? 'Đã xóa gói khỏi máy (đã xuất nên bảng điểm vẫn giữ).' : 'Đã xóa gói chưa xuất và rút khỏi bảng điểm.'); dmMan(); });
+let xoaHet = 0;
+$('dmXoaXuat').onclick = async () => { const L = (await khoHet('goi')).filter(g => g.xuat); if(!L.length) return;
+  if(Date.now() - xoaHet > 4000){ xoaHet = Date.now(); toast(`Sẽ xóa ${L.length} gói ĐÃ xuất khỏi máy này. Anh đã THẤY các file zip trong Drive chưa? Rồi thì bấm lần nữa để xóa.`, 4000); return; }
+  xoaHet = 0; for(const g of L){ await khoXoa('goi', g.ma); delete DM.files[g.ma]; } toast(`Đã xóa ${L.length} gói đã xuất.`); dmMan(); };
+function veDiem(){
+  const D = store.get('dmDiem', []), el = $('dmDiem'); if(!D.length){ el.innerHTML = '<p class="hint">Chưa có lần dạy nào.</p>'; return; }
+  const N = {};                                   // màu -> ngày -> [ống, khớp, gói]
+  for(const e of D){ const d = new Date(e.t), ng = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; for(const m in e.mau){ const q = ((N[m] || (N[m] = {}))[ng] || (N[m][ng] = [0, 0, 0])); q[0] += e.mau[m][0]; q[1] += e.mau[m][1]; q[2]++; } }
+  let h = '<table><tr><th>Màu</th><th>Ngày</th><th>Gói</th><th>Ống khớp</th><th>Tỷ lệ</th><th></th></tr>';
+  for(const m of Object.keys(N).sort()){ let tr = null; for(const ng of Object.keys(N[m]).sort()){ const q = N[m][ng], p = q[0] ? q[1] / q[0] : 0;
+      h += `<tr><td>${esc(m)}</td><td>${ng.slice(8)}/${ng.slice(5, 7)}</td><td>${q[2]}</td><td>${q[1]}/${q[0]}</td><td><b>${Math.round(p * 100)}%</b></td><td>${tr == null ? '' : p > tr + .005 ? '<span class="dmOk">▲</span>' : p < tr - .005 ? '<span class="dmSai">▼</span>' : '='}</td></tr>`; tr = p; } }
+  const a = D.reduce((s, e) => s + e.ong, 0), b = D.reduce((s, e) => s + e.khop, 0);
+  el.innerHTML = h + `</table><p class="hint" style="margin:6px 0 0">Tất cả: ${D.length} gói, máy khớp ${b}/${a} ống (${a ? Math.round(b / a * 100) : 0}%). ▲▼ so với ngày dạy trước của cùng màu. Máy chỉ khá lên sau khi mô hình được học lại trên máy tính/Colab và phát hành bản mới.</p>`;
+}
+
+/* ---------- giữ gáo đang làm dở (không mất khi đóng trang / Safari tải lại) ---------- */
+let nhapT = 0;
+function nhapHen(){ if(!DM.on || !OG.img || !DM.file) return; clearTimeout(nhapT); nhapT = setTimeout(nhapLuu, 250); }
+const anhBiChan = () => { const B = ongKiem(); return B.length > 0 && !(OG.chanSau && B.length === 1); };
+async function nhapLuu(){
+  if(!DM.on || !OG.img || !DM.file || DM.khoiPhuc) return;
+  if(OG.phase === 'khoanh' && anhBiChan()){ try{ await khoXoa('nhap', 'tt'); }catch(e){} return; }      // ảnh bị chặn (mờ, cắt, không có gáo): không coi là "gáo làm dở"
+  const tt = { k: 'tt', t: Date.now(), ten: DM.file.name || '', in: DM.in, ma: DM.ma, maXuat: DM.maXuat, luuLuc: DM.luuLuc || 0, sauLuu: sauLuu(), kyLuu: DM.kyLuu || '', chanSau: OG.chanSau || '', mayOng: DM.mayOng, W0: DM.W0, H0: DM.H0,
+    og: { gao: OG.gao, ngoai: OG.ngoai, rOng: OG.rOng, phase: OG.phase, head: OG.head, cap: OG.cap, exp: OG.exp, ngoaiOng: OG.ngoaiOng, kqMay: OG.kqMay, luot: OG.luot, tDem: OG.tDem, ong: OG.ong } };
+  try{ await khoGhi('nhap', JSON.parse(JSON.stringify(tt))); }catch(e){}
+}
+async function nhapXoa(){ clearTimeout(nhapT); await khoXoa('nhap', 'tt'); await khoXoa('nhap', 'anh'); veDo(); }
+async function veDo(){
+  const el = $('dmDo'); el.innerHTML = ''; if(!DM.on || OG.img) return;
+  const tt = await khoLay('nhap', 'tt'), anh = await khoLay('nhap', 'anh'); if(!tt || !anh || Date.now() - tt.t > 7 * 864e5) return;
+  if(tt.luuLuc && tt.ma && !daXuatMa(tt.ma) && !(await khoLay('goi', tt.ma))){ tt.luuLuc = 0; tt.kyLuu = ''; tt.ma = ''; tt.sauLuu = false; }      // gói của gáo này đã bị xóa khỏi máy khi chưa xuất: coi như CHƯA lưu
+  const ten = esc(tt.in.ten || tt.ten || 'chưa đặt tên'), daLuu = !!tt.luuLuc && !tt.sauLuu;
+  const b = them(daLuu ? `<div class="warnbox" style="background:#e4f6ea;color:#0c5a2a;border-color:#9fd6b3">Gáo vừa làm <b>ĐÃ LƯU thành gói</b> lúc ${gioNgan(tt.luuLuc)}: <b>${ten}</b>. Không cần làm gì thêm (chỉ còn việc Xuất).
+    <div class="row" style="margin:6px 0 0"><button type="button" id="dmDoTiep" style="flex:1">Mở lại để sửa thêm</button><button type="button" id="dmDoBo" class="primary" style="flex:1">Xong, đóng lại</button></div></div>`
+    : `<div class="warnbox">Có một gáo đang làm dở, <b>${tt.luuLuc ? 'đã sửa thêm sau lần lưu – CHƯA lưu lại' : 'CHƯA lưu gói'}</b>: <b>${ten}</b> (${gioNgan(tt.t)}, ${tt.og.phase === 'ketqua' ? 'đã đếm' : 'chưa đếm'}).
+    <div class="row" style="margin:6px 0 0"><button type="button" id="dmDoTiep" class="primary" style="flex:1">Làm tiếp</button><button type="button" id="dmDoBo" style="flex:1">Bỏ</button></div></div>`, el);
+  b.querySelector('#dmDoTiep').onclick = () => khoiPhuc(tt, anh); b.querySelector('#dmDoBo').onclick = async () => { await nhapXoa(); toast(daLuu ? 'Đã đóng. Gói vẫn nằm trong Gói dạy máy.' : 'Đã bỏ gáo làm dở.'); };
+}
+async function khoiPhuc(tt, anh){
+  let f; try{ f = new File([anh.buf], anh.ten || 'anh.jpg', { type: anh.type || 'image/jpeg' }); }catch(e){ f = new Blob([anh.buf], { type: anh.type || 'image/jpeg' }); f.name = anh.ten || 'anh.jpg'; }
+  DM.khoiPhuc = true;
+  try{
+    MODE.m = 'tube'; syncModeUI(); ongSyncHome();
+    await ongMo(f); if(!OG.img){ DM.khoiPhuc = false; return; }
+    const g = tt.og; OG.gao = g.gao; OG.ngoai = g.ngoai; OG.rOng = g.rOng; OG.head = g.head; OG.cap = g.cap; OG.exp = g.exp; OG.ngoaiOng = g.ngoaiOng || []; OG.kqMay = g.kqMay; OG.luot = g.luot || 0; OG.tDem = g.tDem || 0; OG.ong = g.ong; OG.loiKhoanh = false; OG.chanSau = tt.chanSau || '';
+    OG.phase = g.ong.some(o => o.dots) && g.phase === 'ketqua' ? 'ketqua' : 'khoanh';
+    DM.in = tt.in; DM.ma = tt.ma || ''; DM.maXuat = !!tt.maXuat; DM.luuLuc = tt.luuLuc || 0; DM.kyLuu = tt.kyLuu || ''; DM.mayOng = tt.mayOng; ganIn();
+    ongTool(OG.phase === 'ketqua' ? 'xem' : 'ong'); DM.khoiPhuc = false; ongCapNhat(); toast('Đã mở lại gáo đang làm dở.');
+  }catch(e){ console.error(e); toast('Không mở lại được: ' + (e.message || e), 5000); }
+  DM.khoiPhuc = false;
+}
+
+/* ---------- móc vào luồng có sẵn ---------- */
+function cuAnh(file){ return new Promise(res => { const u = URL.createObjectURL(file), im = new Image(); im.onload = () => { URL.revokeObjectURL(u); res([im.naturalWidth, im.naturalHeight]); }; im.onerror = () => { URL.revokeObjectURL(u); res([0, 0]); }; im.src = u; }); }
+const ongMo0 = ongMo;
+ongMo = async function(file){
+  if(!DM.on) return ongMo0(file);
+  const truoc = OG.img, kp = DM.khoiPhuc;
+  await ongMo0(file);
+  if(OG.img === truoc || !OG.img) return;                                    // mở ảnh thất bại
+  DM.file = file; DM.buf = null; DM.sha = ''; DM.nhac = ''; DM.nhacKhoa = '';
+  if(!kp){ try{ await khoXoa('nhap', 'tt'); }catch(e){}
+    DM.in = inMoi(); DM.ma = ''; DM.maXuat = false; DM.luuLuc = 0; DM.kyLuu = ''; if(OG.exp) DM.in.soOng = String(OG.exp); DM.mayOng = OG.loiKhoanh ? 0 : OG.ong.length; ganIn(); }
+  const wh = await cuAnh(file); DM.W0 = wh[0]; DM.H0 = wh[1];
+  if(DM.W0 && Math.abs(DM.W0 / DM.H0 - OG.img.width / OG.img.height) > 0.01){ DM.W0 = 0; toast('Cỡ ảnh gốc đọc không khớp – gói của ảnh này sẽ không lưu được.', 5000); }
+  if(!kp){ try{ DM.buf = await file.arrayBuffer(); await khoGhi('nhap', { k: 'anh', buf: DM.buf, ten: file.name || '', type: file.type || 'image/jpeg' }); }catch(e){ console.error(e); } }
+  dmVe(); nhapHen();
+};
+const ongCapNhat0 = ongCapNhat;
+ongCapNhat = function(){ ongCapNhat0(); if(DM.on){ dmVe(); nhapHen(); } else $('ongLuu').textContent = 'Lưu kết quả'; };
+const tubeVe0 = tubeVe;
+tubeVe = function(){ tubeVe0(); dmTdVe(); if(DM.on && TD.o) nhapHen(); };
+const tubeMo0 = tubeMo;
+tubeMo = function(id){ tubeMo0(id); dmTdVe(); };
+const tubeDong0 = tubeDong;
+tubeDong = function(silent){ const o = TD.o;
+  // Dạy máy: anh đã báo số thật của ống và sửa chấm cho bằng đúng số đó = đã soát ống này (khỏi phải bấm thêm "Xác nhận")
+  if(DM.on && !silent && o && o.dots && o.sua && !o.nguoi && tubeCount(o) === nhapOng(o)){ o.nguoi = true; o.sua = false; }
+  $('dmTdN').blur(); tubeDong0(silent); $('dmTd').classList.add('hidden'); };
+const ongDong0 = ongDong;
+ongDong = function(){ ongDong0(); DM.file = null; DM.buf = null; $('dmCard').classList.add('hidden'); if(DM.on) nhapXoa(); };
+let boHoi = 0, suaHoi = 0;
+function hoiLai(b, chu, goc){ b.textContent = chu; b.style.borderColor = '#d23b3b'; b.style.color = '#d23b3b'; setTimeout(() => { b.textContent = goc; b.style.borderColor = ''; b.style.color = ''; }, 4000); }
+$('ongMoi').onclick = $('ongMoi2').onclick = ev => {
+  if(chuaLuu() && Date.now() - boHoi > 4000){ boHoi = Date.now(); hoiLai(ev.currentTarget, DM.luuLuc ? 'Có sửa CHƯA lưu lại! Bấm nữa để bỏ' : 'CHƯA lưu gói! Bấm lần nữa để bỏ', 'Ảnh khác'); return; }
+  boHoi = 0; ongDong(); };
+const ongSua0 = $('ongSua').onclick;
+$('ongSua').onclick = ev => {
+  if(DM.on && OG.ong.some(o => o.dots && daSua(o)) && Date.now() - suaHoi > 4000){ suaHoi = Date.now(); hoiLai(ev.currentTarget, 'Sẽ MẤT chấm đã sửa! Bấm nữa', 'Sửa vòng ống'); return; }
+  suaHoi = 0; ongSua0.call($('ongSua'), ev); };
+const show0 = show;
+show = function(id){ $('dm').classList.toggle('hidden', id !== 'dm');
+  if(id === 'dm'){ for(const s of ['home', 'list', 'result', 'history', 'ong']) $(s).classList.add('hidden'); window.scrollTo(0, 0); } else show0(id);
+  if(id === 'home') dmHome(); };
+const btnPick0 = $('btnPick').textContent;
+function dmHome(){
+  $('dmToggle').textContent = DM.on ? 'DẠY MÁY: ĐANG BẬT (chạm để tắt)' : 'Bật chế độ DẠY MÁY';
+  $('dmToggle').classList.toggle('primary', DM.on); $('dmHome').classList.toggle('hidden', !DM.on);
+  const hd = document.querySelector('header h1 small'); if(hd){ hd.textContent = hd.textContent.replace(/ · BẬT$/, '') + (DM.on ? ' · BẬT' : ''); }
+  const rx = $('inTubeExp').closest('.row'); if(rx) rx.classList.toggle('hidden', DM.on);          // Dạy máy có ô "Số ống" riêng – ẩn ô "Số ống theo sổ" cho khỏi nhầm
+  $('btnPick').textContent = DM.on && MODE.m === 'tube' ? 'Chọn ảnh có sẵn (Dạy máy: MỘT ảnh, một gáo)' : btnPick0;
+  if(DM.on){ dmDem(); veDo(); }
+}
+$('dmToggle').onclick = () => { DM.on = !DM.on; store.set('dmOn', DM.on); dmHome(); toast(DM.on ? 'Đã bật Dạy máy: chụp/chọn MỘT ảnh gáo để bắt đầu.' : 'Đã tắt Dạy máy – đếm như thường.'); };
+$('dmBtnGoi').onclick = async () => { show('dm'); await dmMan(); };
+$('dmBtnDiem').onclick = async () => { show('dm'); await dmMan(); $('dmDiemCard').scrollIntoView(); };
+$('dmBack').onclick = () => show('home');
+window.addEventListener('pagehide', () => { if(DM.on && OG.img && DM.file){ clearTimeout(nhapT); nhapLuu(); } });
+document.addEventListener('visibilitychange', () => { if(document.hidden && DM.on && OG.img && DM.file){ clearTimeout(nhapT); nhapLuu(); } });
+window.__dmThu = { zipStore, crc32, cham, dungMeta, dmMan, khoHet, fileCua, ky, sauLuu, ban: DM_BAN };
+if(DM.on){ MODE.m = 'tube'; syncModeUI(); ongSyncHome(); }      // đang bật Dạy máy: mở lại trang là vào thẳng chế độ đếm theo ống, thấy ngay số gói chưa xuất và gáo làm dở
+document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', dmHome));
+ganIn(); dmHome();
+})();
+
+</script>
+<!-- DM-END -->
 </body>
 </html>
