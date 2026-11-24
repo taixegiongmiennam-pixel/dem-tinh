@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Đếm Tinh – bản thử khoanh ống · KO-2411a</title>
+<title>Đếm Tinh – bản thử khoanh ống · KO-2411b</title>
 <meta name="description" content="Đếm cọng tinh trong cốc bằng camera, chạy ngay trên điện thoại">
 <meta name="theme-color" content="#16502e">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -87,7 +87,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
 </head>
 <body>
 <header>
-  <h1>Đếm Tinh <small style="font-size:11px;font-weight:400;opacity:.85">bản thử khoanh ống · KO-2411a</small></h1>
+  <h1>Đếm Tinh <small style="font-size:11px;font-weight:400;opacity:.85">bản thử khoanh ống · KO-2411b</small></h1>
   <button id="btnList" type="button" class="hidden">Danh sách</button>
   <button id="btnHistory" type="button">Lịch sử</button>
 </header>
@@ -1034,7 +1034,7 @@ var KHOANH = (function () {
   return { chay: chay, timOng: timOng, danhDau: danhDau };
 })();
 /* =================== BẢN THỬ: ĐẾM THEO ỐNG (GÁO) – chỉ tới bước khoanh =================== */
-const BAN_THU = 'KO-2411a';
+const BAN_THU = 'KO-2411b';
 const OG = { img: null, k: 1, gao: null, ngoai: null, ong: [], rOng: 0, tool: 'ong', zoom: 1, ghiChu: [], drag: null, ms: 0 };
 const ocv = $('ongCv'), og = ocv.getContext('2d');
 async function ongMo(file){
@@ -1107,7 +1107,7 @@ function ongGan(p){ let b = -1, bd = 1e9; OG.ong.forEach((o, i) => { const d = M
 ocv.addEventListener('pointerdown', ev => {
   if(!OG.img || OG.tool === 'xem') return; const p = ongPt(ev);
   if(OG.tool === 'ong'){ const i = ongGan(p); if(i >= 0){ OG.drag = { i, dx: OG.ong[i].x - p.x, dy: OG.ong[i].y - p.y }; ocv.setPointerCapture(ev.pointerId); } }
-  else if(OG.tool === 'them'){ OG.ong.push({ x: p.x, y: p.y, r: OG.rOng, r0: OG.rOng, khop: null, tay: false, them: true }); ongCapNhat(); }
+  else if(OG.tool === 'them'){ OG.ong.push({ x: p.x, y: p.y, r: OG.rOng, r0: OG.rOng, khop: null, tay: true, them: true }); ongCapNhat(); }
   else if(OG.tool === 'xoa'){ const i = ongGan(p); if(i >= 0){ OG.ong.splice(i, 1); ongCapNhat(); } }
   else if(OG.tool === 'gao'){ const G = OG.gao, d = Math.hypot(p.x - G.x, p.y - G.y);
     OG.drag = Math.abs(d - G.r) < Math.max(G.r * .12, 30) ? { cỡ: 1 } : { gx: G.x - p.x, gy: G.y - p.y }; ocv.setPointerCapture(ev.pointerId); }
@@ -1115,7 +1115,7 @@ ocv.addEventListener('pointerdown', ev => {
 });
 ocv.addEventListener('pointermove', ev => {
   if(!OG.drag) return; const p = ongPt(ev), D = OG.drag;
-  if(D.i != null){ const o = OG.ong[D.i]; o.x = p.x + D.dx; o.y = p.y + D.dy; o.khop = null; KHOANH.danhDau(OG.ong, OG.gao, OG.rOng); }
+  if(D.i != null){ const o = OG.ong[D.i]; o.x = p.x + D.dx; o.y = p.y + D.dy; o.khop = null; if(!o.tay){ o.tay = true; o.r = o.r0 || o.r; } KHOANH.danhDau(OG.ong, OG.gao, OG.rOng); }
   else { const G = OG.gao; if(D.cỡ) G.r = Math.max(40, Math.hypot(p.x - G.x, p.y - G.y)); else { G.x = p.x + D.gx; G.y = p.y + D.gy; } G.nguon = 'tay'; KHOANH.danhDau(OG.ong, OG.gao, OG.rOng); }
   ongVe(); ev.preventDefault();
 });
