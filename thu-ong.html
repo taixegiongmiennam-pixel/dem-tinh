@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Đếm Tinh – bản thử khoanh ống · KO-2411b</title>
+<title>Đếm Tinh – bản thử đếm theo ống · VL4</title>
 <meta name="description" content="Đếm cọng tinh trong cốc bằng camera, chạy ngay trên điện thoại">
 <meta name="theme-color" content="#16502e">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -87,7 +87,7 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
 </head>
 <body>
 <header>
-  <h1>Đếm Tinh <small style="font-size:11px;font-weight:400;opacity:.85">bản thử khoanh ống · KO-2411b</small></h1>
+  <h1>Đếm Tinh <small style="font-size:11px;font-weight:400;opacity:.85;white-space:nowrap">thử ống · VL4</small></h1>
   <button id="btnList" type="button" class="hidden">Danh sách</button>
   <button id="btnHistory" type="button">Lịch sử</button>
 </header>
@@ -112,7 +112,11 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
       <button class="big-btn secondary" id="btnPick" type="button">Chọn ảnh có sẵn (chọn được nhiều ảnh)</button>
       <input id="fileCam" type="file" accept="image/*" capture="environment" class="hidden">
       <input id="filePick" type="file" accept="image/*" multiple class="hidden">
-      <p class="hint hidden" id="tubeHint">Bản thử: chụp <b>thẳng từ trên xuống, cả gáo nằm trong khung</b>. App khoanh gáo nhựa bên trong và từng ống, báo "Máy thấy N ống" để anh xem và sửa. <b>Chưa đếm cọng</b> (bản sau). Mỗi lần một ảnh.</p>
+      <p class="hint hidden" id="tubeHint">Chụp <b>thẳng từ trên xuống, cả gáo nằm trọn trong khung, ống đứng thẳng</b>, chờ khói tan. App khoanh gáo, khoanh từng ống cho anh xem/sửa, rồi đếm từng ống: <b>xanh</b> = đủ và chắc, <b>đỏ</b> = khác số chuẩn, <b>vàng</b> = chưa chắc. Mỗi lần một ảnh. Dùng ảnh gốc, không qua Zalo/WhatsApp.</p>
+      <div class="hidden" id="tubeRow">
+        <div class="row"><label for="inTubeExp">Số ống theo sổ (không bắt buộc)</label><input type="number" id="inTubeExp" min="0" max="200" placeholder="vd 36" inputmode="numeric"></div>
+        <div class="row"><label for="inTubeCap">Số liều mỗi ống đầy</label><input type="number" id="inTubeCap" min="1" max="100" value="25" inputmode="numeric"></div>
+      </div>
       <div id="status">Đang tải mô hình…</div>
     </div>
     <div class="card">
@@ -181,44 +185,74 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
   </section>
 
   <!-- LỊCH SỬ -->
-  <!-- BẢN THỬ: KHOANH GÁO + ỐNG -->
+  <!-- ĐẾM THEO ỐNG (GÁO): khoanh gáo -> khoanh ống -> đếm từng ống -->
   <section id="ong" class="hidden">
     <div class="card">
+      <div id="ongStep" style="font-size:13px;font-weight:700;color:var(--muted);margin-bottom:4px"></div>
       <div class="count-row">
-        <div class="count"><small style="margin:0 6px 0 0">Máy thấy</small><span id="ongN">0</span><small>ống</small></div>
+        <div class="count" id="ongHead"></div>
         <div class="chips" id="ongChips"></div>
       </div>
+      <div id="ongBlock"></div>
+      <div id="ongSum"></div>
+    </div>
+    <div id="ongView" style="overflow:auto;max-height:70vh;border-radius:12px;background:#000;-webkit-overflow-scrolling:touch"><canvas id="ongCv" style="display:block;width:100%"></canvas></div>
+
+    <!-- Bước 1–2: sửa vòng -->
+    <div id="ongP1">
+      <div class="seg" id="ongTools" style="margin-top:8px;grid-template-columns:repeat(5,1fr)">
+        <button type="button" data-t="xem">Xem</button>
+        <button type="button" data-t="ong" class="on">Kéo ống</button>
+        <button type="button" data-t="them">Thêm</button>
+        <button type="button" data-t="xoa">Xóa</button>
+        <button type="button" data-t="gao">Vòng gáo</button>
+      </div>
+      <p class="hint" id="ongHint"></p>
+      <div class="card">
+        <button type="button" class="big-btn" id="ongDem">Đếm cọng từng ống</button>
+        <div class="row">
+          <button type="button" id="ongLai" style="flex:1">Khoanh lại ống</button>
+          <button type="button" id="ongMay" style="flex:1">Về kết quả máy</button>
+          <button type="button" id="ongZo" style="width:46px">−</button>
+          <button type="button" id="ongZi" style="width:46px">+</button>
+        </div>
+        <div class="row"><button type="button" id="ongMoi" style="flex:1">Ảnh khác</button></div>
+      </div>
+    </div>
+
+    <!-- Bước 3: kết quả -->
+    <div id="ongP2" class="hidden">
+      <p class="hint">Vòng <b style="color:#12a14a">XANH</b> = đủ số và máy chắc · <b style="color:#d23b3b">ĐỎ</b> = khác số chuẩn · <b style="color:#b98a00">VÀNG</b> = chưa chắc. <b>Chạm vào một ống</b> để xem phóng to và sửa từng chấm.</p>
+      <div class="card">
+        <b>Cần xem</b> <span class="hint" id="ongCanN"></span>
+        <div id="ongCan" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <div class="row" style="margin-top:0">
+          <button type="button" id="ongCham" style="flex:1">Hiện chấm ở ống xanh</button>
+          <button type="button" id="ongZo2" style="width:46px">−</button>
+          <button type="button" id="ongZi2" style="width:46px">+</button>
+        </div>
+        <div class="row"><input type="text" id="ongLabel" placeholder="Mã gáo trước: B04-3T, rồi ghi chú…"></div>
+        <div class="row">
+          <button type="button" id="ongLuu" class="primary" style="flex:1">Lưu kết quả</button>
+          <button type="button" id="ongSua" style="flex:1">Sửa vòng ống</button>
+        </div>
+        <div class="row"><button type="button" id="ongMoi2" style="flex:1">Ảnh khác</button></div>
+      </div>
+    </div>
+    <div class="card" id="ongNote">
       <div id="ongWarns"></div>
       <p class="hint" id="ongInfo"></p>
-    </div>
-    <div id="ongView" style="overflow:auto;max-height:78vh;border-radius:12px;background:#000"><canvas id="ongCv" style="display:block;width:100%"></canvas></div>
-    <div class="seg" id="ongTools" style="margin-top:8px;grid-template-columns:repeat(5,1fr)">
-      <button type="button" data-t="xem">Xem</button>
-      <button type="button" data-t="ong" class="on">Kéo ống</button>
-      <button type="button" data-t="them">Thêm</button>
-      <button type="button" data-t="xoa">Xóa</button>
-      <button type="button" data-t="gao">Vòng gáo</button>
-    </div>
-    <p class="hint" id="ongHint"></p>
-    <div class="card">
-      <div class="row">
-        <button type="button" id="ongLai" style="flex:1">Khoanh lại ống</button>
-        <button type="button" id="ongMay" style="flex:1">Về kết quả máy</button>
-        <button type="button" id="ongZo" style="width:46px">−</button>
-        <button type="button" id="ongZi" style="width:46px">+</button>
-      </div>
-      <div class="row">
-        <button type="button" id="ongDem" style="flex:1;opacity:.5">Đếm cọng – bản sau</button>
-        <button type="button" id="ongMoi" style="flex:1">Ảnh khác</button>
-      </div>
     </div>
   </section>
 
   <section id="history" class="hidden">
     <div class="card">
-      <div class="row" style="margin-top:0">
-        <b style="flex:1">Lịch sử đếm</b>
-        <button type="button" id="btnCsv">Xuất CSV</button>
+      <div class="row" style="margin-top:0;flex-wrap:wrap">
+        <b style="flex:1 0 100%">Lịch sử đếm</b>
+        <button type="button" id="btnCsv" style="flex:1">Xuất CSV</button>
+        <button type="button" id="btnCsvOng" style="flex:1">CSV theo ống</button>
         <button type="button" id="btnBack">Quay lại</button>
       </div>
       <div id="histList"></div>
@@ -249,6 +283,30 @@ main{max-width:720px;margin:0 auto;padding:14px 16px 140px}
           <button type="button" class="b-plain" id="gClose" style="grid-column:span 2">Đóng</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Màn hình MỘT ỐNG: phóng to, chấm từng cọng, chạm để bỏ/thêm -->
+<div id="tubeDlg" class="hidden" style="position:fixed;inset:0;z-index:15;background:var(--bg);overflow:auto;-webkit-overflow-scrolling:touch;padding:calc(env(safe-area-inset-top) + 10px) 12px calc(env(safe-area-inset-bottom) + 14px)">
+  <div style="max-width:560px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div id="tdTitle" style="font-weight:700;font-size:17px"></div>
+        <div id="tdSub" class="hint" style="margin:0"></div>
+      </div>
+      <div id="tdCount" style="font-size:40px;font-weight:800;line-height:1"></div>
+    </div>
+    <canvas id="tdCv" width="720" height="720" style="display:block;width:100%;height:auto;border-radius:12px;background:#000;margin:8px 0;touch-action:manipulation"></canvas>
+    <p class="hint" style="margin:0 0 8px"><span class="dot" style="background:#fff;border:1px solid #000"></span>máy chắc &nbsp;<span class="dot" style="background:#ff2bd6"></span>máy chưa chắc &nbsp;<span class="dot" style="background:#2f86ff"></span>anh thêm &nbsp;<span class="dot" style="background:transparent;border:2px solid #ff2bd6"></span>nghi, chưa tính.<br><b>Chạm vào chấm để bỏ</b> (chạm lại để lấy lại), <b>chạm chỗ trống để thêm</b>.</p>
+    <div class="row" style="margin:0 0 8px">
+      <button type="button" id="tdOk" class="primary" style="flex:2;padding:13px 4px">Xác nhận số này</button>
+      <button type="button" id="tdMay" style="flex:1;padding:13px 4px">Về số máy</button>
+    </div>
+    <div class="row" style="margin:0">
+      <button type="button" id="tdPrev" style="flex:1;padding:13px 4px">◀ Ống trước</button>
+      <button type="button" id="tdNext" style="flex:1;padding:13px 4px">Ống sau ▶</button>
+      <button type="button" id="tdClose" style="flex:1;padding:13px 4px">Đóng</button>
     </div>
   </div>
 </div>
@@ -793,20 +851,21 @@ function renderHistory(){
     const im = document.createElement('img'); im.src = e.img || ''; im.alt = '';
     const meta = document.createElement('div'); meta.className = 'meta';
     const b = document.createElement('b'); b.textContent = e.n + ' cọng';
-    const d1 = document.createElement('div'); d1.textContent = (e.label || '(không ghi chú)') + (e.mode === 'goblet' ? ` · ${e.goblets} cốc × ${e.cap}` : '');
-    const d2 = document.createElement('div'); d2.textContent = new Date(e.t).toLocaleString('vi-VN') + (e.pending ? ` · còn ${e.pending} mục chưa soát` : ' · đã soát');
+    const d1 = document.createElement('div'); d1.textContent = (e.label || '(không ghi chú)') + (e.mode === 'goblet' ? ` · ${e.goblets} cốc × ${e.cap}` : e.mode === 'tube' ? ` · ${e.tubes} ống: ${e.xanh} xanh, ${e['do']} đỏ, ${e.vang} vàng` : '');
+    const d2 = document.createElement('div'); d2.textContent = new Date(e.t).toLocaleString('vi-VN') + (e.pending ? ` · còn ${e.pending} ${e.mode === 'tube' ? 'ống vàng' : 'mục'} chưa soát` : ' · đã soát');
+    if(e.mode === 'tube'){ d1.style.whiteSpace = 'normal'; d2.style.whiteSpace = 'normal'; }
     meta.append(b, d1, d2);
     const del = document.createElement('button'); del.textContent = 'Xoá';
     del.onclick = () => { if(confirm('Xoá kết quả này?')){ h.splice(i, 1); store.set('history', h); renderHistory(); } };
     div.append(im, meta, del); L.append(div);
   });
 }
-$('btnHistory').onclick = () => { closeRv(true); renderHistory(); show('history'); };
-$('btnBack').onclick = () => { if(R) show('result'); else if(ITEMS.length) { renderList(); show('list'); } else show('home'); };
+$('btnHistory').onclick = () => { closeRv(true); tubeDong(true); renderHistory(); show('history'); };
+$('btnBack').onclick = () => { if(OG.img){ show('ong'); ongCapNhat(); } else if(R) show('result'); else if(ITEMS.length) { renderList(); show('list'); } else show('home'); };
 $('btnCsv').onclick = () => {
   const h = store.get('history', []);
-  const rows = [['Thời gian', 'Số cọng', 'Chế độ', 'Số cốc', 'Liều/cốc', 'Cốc đã xác nhận', 'Mục chưa soát', 'Nghi cọng rớt', 'Ghi chú']]
-    .concat(h.map(e => [new Date(e.t).toLocaleString('vi-VN'), e.n, e.mode === 'goblet' ? 'Ống chia cốc' : 'Cọng rời', e.goblets ?? '', e.cap ?? '', e.gobletFixed ?? '', e.pending ?? '', e.strays ?? '', e.label]));
+  const rows = [['Thời gian', 'Số cọng', 'Chế độ', 'Số cốc', 'Liều/cốc', 'Cốc đã xác nhận', 'Mục chưa soát', 'Nghi cọng rớt', 'Ghi chú', 'Số ống máy', 'Số ống theo sổ', 'Ống xanh', 'Ống đỏ', 'Ống vàng', 'Cọng ngoài ống', 'Tổng chắc chắn', 'Tổng chưa chắc', 'Tổng theo màu', 'Từng ống', 'Ống người soát', 'Vòng bất thường', 'Đường kính ống px']]
+    .concat(h.map(e => [new Date(e.t).toLocaleString('vi-VN'), e.n, e.mode === 'goblet' ? 'Ống chia cốc' : e.mode === 'tube' ? 'Đếm theo ống' : 'Cọng rời', e.goblets ?? '', e.cap ?? '', e.gobletFixed ?? '', e.pending ?? '', e.strays ?? '', e.label, e.tubes ?? '', e.exp ?? '', e.xanh ?? '', e['do'] ?? '', e.vang ?? '', e.ngoai ?? '', e.chac ?? '', e.chuaChac ?? '', e.mau ?? '', e.day ?? '', e.nguoi ?? '', e.batThuong ?? '', e.dk ?? '']));
   const csv = '﻿' + rows.map(r => r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = 'dem_tinh_' + new Date().toISOString().slice(0, 10) + '.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
@@ -994,7 +1053,22 @@ var KHOANH = (function () {
       if (!best || q > best.q) best = { q: q, r: r, P: P };
     }
     if (!best) return { ong: [], r: 0 };
-    var ong = best.P.map(function (p) { return { x: (p[1] + .5) / k, y: (p[2] + .5) / k, r: best.r / k, khop: Math.round(p[0] * 100) / 100 }; });
+    (function () {
+      var ri = Math.round(best.r), h1 = nuaRong(ri), h2 = nuaRong(Math.floor(ri * 1.35)), A1 = h1.A, A2 = h2.A - h1.A, P = best.P, n0 = P.length, sep2 = Math.pow(Math.floor(ri * 1.75), 2), gan2 = Math.pow(ri * 2.75, 2), C = [];
+      if (n0 < 6) return;
+      for (var y = y0; y <= y1; y += 2) for (var x = x0; x <= x1; x += 2) {
+        var dg = Math.sqrt((x - gcx) * (x - gcx) + (y - gcy) * (y - gcy)); if (dg + ri * .85 > gR) continue;
+        var s1 = tongDia(x, y, h1); if (s1 < .12 * A1) continue;
+        var v = s1 / A1 - (tongDia(x, y, h2) - s1) / A2 * .8; if (v >= .08) C.push([v, x, y, 1]);
+      }
+      C.sort(function (a, b) { return b[0] - a[0]; });
+      for (var c = 0; c < C.length; c++) {
+        var ok = 1, nb = 0;
+        for (var p = 0; p < P.length; p++) { var dx = C[c][1] - P[p][1], dy = C[c][2] - P[p][2], d2 = dx * dx + dy * dy; if (d2 <= sep2) { ok = 0; break; } if (p < n0 && d2 <= gan2) nb++; }
+        if (ok && nb >= 3) P.push(C[c]);
+      }
+    })();
+    var ong = best.P.map(function (p) { var o = { x: (p[1] + .5) / k, y: (p[2] + .5) / k, r: best.r / k, khop: Math.round(p[0] * 100) / 100 }; if (p[3]) o.doan = 1; return o; });
     return { ong: ong, r: best.r / k };
   }
   /* Gắn cờ + thu bán kính để các vòng không bao giờ chồng nhau */
@@ -1005,7 +1079,8 @@ var KHOANH = (function () {
       if (!o.tay) o.r = Math.min(o.r0 || (o.r0 = o.r), gan / 2);
       o.co = [];
       if (gao && Math.hypot(o.x - gao.x, o.y - gao.y) + o.r > gao.r * 1.02) o.co.push('lấn ra ngoài gáo nhựa');
-      if (o.khop != null && o.khop < .36) o.co.push('hình không rõ (khớp ' + o.khop + ')');
+      if (o.doan) o.co.push('máy đoán có ống ở đây (hình mờ/chói) – xem lại');
+      else if (o.khop != null && o.khop < .36) o.co.push('hình không rõ (khớp ' + o.khop + ')');
       if (rChuan && (o.r > rChuan * 1.25 || o.r < rChuan * .75)) o.co.push('cỡ khác các ống còn lại');
     }
     for (var i = 0; i < ong.length; i++) for (var j = i + 1; j < ong.length; j++)
@@ -1033,102 +1108,449 @@ var KHOANH = (function () {
   }
   return { chay: chay, timOng: timOng, danhDau: danhDau };
 })();
-/* =================== BẢN THỬ: ĐẾM THEO ỐNG (GÁO) – chỉ tới bước khoanh =================== */
-const BAN_THU = 'KO-2411b';
-const OG = { img: null, k: 1, gao: null, ngoai: null, ong: [], rOng: 0, tool: 'ong', zoom: 1, ghiChu: [], drag: null, ms: 0 };
+/* =================== ĐẾM THEO ỐNG (GÁO) – bản thử vòng lặp: khoanh gáo -> khoanh ống -> đếm từng ống =================== */
+const BAN_THU = 'VL4';
+const TB = {
+  conf: 0.40, band: 0.12,          // ngưỡng tính cọng (theo số đo KE-HOACH-3-BUOC: 0,40 tốt nhất trên 3T), dải "chưa chắc" ±0,12
+  cell: 240, per: 16,              // 16 ống / một lượt mô hình 960
+  // 3 lần đếm: cỡ đầu cọng ~30 / ~33 / ~27 px (mô hình nhận tốt nhất quanh 30 px; phóng to hơn làm kém đi)
+  passes: [{ f: 86, M: [1, 0, 0, 1], lech: 0 }, { f: 96, M: [0, -1, 1, 0], lech: 0.06 }, { f: 78, M: [-1, 0, 0, 1], lech: -0.06 }],
+  minTubeD: 90,                    // đường kính ống (px) dưới mức này: chụp xa quá, không đếm
+  softTubeD: 280,                  // dưới mức này: cảnh báo ảnh nhỏ/nén (ước lượng trong kế hoạch, chưa đo trên ảnh gốc)
+  minGaoFrac: 0.45,                // đường kính gáo < 45% cạnh ngắn ảnh: chụp xa quá
+  cutTol: 0.10,                    // vòng gáo vượt mép ảnh quá 10% bán kính: gáo bị cắt (3–10%: chỉ nhắc, vì vòng gáo "ôm sát ống" là ước lượng)
+  minSharp: 9              // độ nét tối thiểu (xem ongDoNet)
+};
+const OG = { img: null, k: 1, gao: null, ngoai: null, ong: [], rOng: 0, tool: 'ong', zoom: 1, ghiChu: [], drag: null, ms: 0,
+  phase: 'khoanh', cap: 25, exp: 0, ngoaiOng: [], head: 0, tDem: 0, chamXanh: false, sharp: 0, loiKhoanh: false, saved: false, luot: 0, file: '' };
 const ocv = $('ongCv'), og = ocv.getContext('2d');
+const MAU_KQ = { xanh: '#21d066', do: '#ff3b30', vang: '#ffd21a' }, TEN_KQ = { xanh: 'XANH', do: 'ĐỎ', vang: 'VÀNG' }, KY_KQ = { xanh: 'X', do: 'Đ', vang: 'V' };
+
+/* ---------- mở ảnh, khoanh gáo + ống ---------- */
+function ongDoNet(d, W, H, G){     // độ nét = trung bình |Laplacian| của ảnh xám 640 px, chỉ tính trong vòng gáo
+  let s = 0, n = 0; const g = new Float32Array(W * H);
+  for(let i = 0, j = 0; i < W * H; i++, j += 4) g[i] = d[j] * .299 + d[j + 1] * .587 + d[j + 2] * .114;
+  const x0 = Math.max(1, Math.floor(G.x - G.r)), x1 = Math.min(W - 2, Math.ceil(G.x + G.r)), y0 = Math.max(1, Math.floor(G.y - G.r)), y1 = Math.min(H - 2, Math.ceil(G.y + G.r)), r2 = G.r * G.r;
+  for(let y = y0; y <= y1; y++) for(let x = x0; x <= x1; x++){
+    if((x - G.x) * (x - G.x) + (y - G.y) * (y - G.y) > r2) continue;
+    const i = y * W + x; s += Math.abs(4 * g[i] - g[i - 1] - g[i + 1] - g[i - W] - g[i + W]); n++;
+  }
+  return n ? s / n : 0;
+}
 async function ongMo(file){
   busy(true, 'Đang khoanh gáo và ống…'); await sleep(30);
   try{
     const img = await decode(file), t0 = performance.now();
     const k = Math.min(1, 640 / Math.max(img.width, img.height)), c = document.createElement('canvas');
     c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-    const x = c.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, c.width, c.height);
+    const x = c.getContext('2d', { willReadFrequently: true }); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, c.width, c.height);
     const d = x.getImageData(0, 0, c.width, c.height);
     const kq = KHOANH.chay(d.data, c.width, c.height, {});
-    OG.img = img; OG.k = k; OG.small = d; OG.ms = performance.now() - t0; OG.zoom = 1; OG.ghiChu = kq.ghiChu || [];
+    OG.img = img; OG.k = k; OG.small = d; OG.zoom = 1; OG.ghiChu = kq.ghiChu || []; OG.file = file.name || '';
+    OG.phase = 'khoanh'; OG.ngoaiOng = []; OG.saved = false; OG.chamXanh = false; OG.luot = 0; OG.tDem = 0; OG.chanSau = '';
+    OG.cap = Math.max(1, parseInt($('inTubeCap').value) || 25); OG.exp = Math.max(0, parseInt($('inTubeExp').value) || 0);
     const up = o => o ? Object.assign({}, o, { x: o.x / k, y: o.y / k, r: o.r / k, r0: o.r0 ? o.r0 / k : undefined }) : null;
-    if(kq.loi){ OG.ngoai = null; OG.gao = { x: img.width / 2, y: img.height / 2, r: Math.min(img.width, img.height) * .4, nguon: 'tay' }; OG.ong = []; OG.rOng = OG.gao.r * .14;
-      OG.ghiChu = ['Máy không thấy vành gáo – hãy kéo vòng gáo vào đúng chỗ rồi bấm "Khoanh lại ống", hoặc chụp lại cho cả gáo nằm trong khung.']; }
+    OG.loiKhoanh = !!kq.loi;
+    if(kq.loi){ OG.ngoai = null; OG.gao = { x: img.width / 2, y: img.height / 2, r: Math.min(img.width, img.height) * .4, nguon: 'ước lượng' }; OG.ong = []; OG.rOng = OG.gao.r * .14; OG.ghiChu = []; }
     else { OG.ngoai = up(kq.ngoai); OG.gao = up(kq.trong); OG.ong = kq.ong.map(up); OG.rOng = kq.rOng / k; }
-    OG.kqMay = JSON.parse(JSON.stringify({ ngoai: OG.ngoai, gao: OG.gao, ong: OG.ong, rOng: OG.rOng }));
-    ocv.width = img.width; ocv.height = img.height; ongTool('ong'); ongCapNhat(); show('ong');
-  }catch(e){ console.error(e); toast('Lỗi: ' + (e.message || e)); }
+    OG.sharp = ongDoNet(d.data, c.width, c.height, { x: OG.gao.x * k, y: OG.gao.y * k, r: OG.gao.r * k });
+    OG.ms = performance.now() - t0;
+    OG.kqMay = JSON.parse(JSON.stringify({ ngoai: OG.ngoai, gao: OG.gao, ong: OG.ong, rOng: OG.rOng, loi: OG.loiKhoanh }));
+    $('ongLabel').value = '';
+    ocv.width = img.width; ocv.height = img.height; ocv.style.width = '100%'; ongTool('ong'); ongCapNhat(); show('ong');
+  }catch(e){ console.error(e); toast('Không mở được ảnh: ' + (e.message || e), 5000); }
   busy(false);
 }
 function ongKhoanhLai(){
   if(!OG.small) return; const k = OG.k;
   const s = KHOANH.timOng(OG.small.data, OG.small.width, OG.small.height, { x: OG.gao.x * k, y: OG.gao.y * k, r: OG.gao.r * k });
-  OG.ong = s.ong.map(o => ({ x: o.x / k, y: o.y / k, r: o.r / k, khop: o.khop })); OG.rOng = s.r / k || OG.rOng; ongCapNhat(); toast('Đã khoanh lại: ' + OG.ong.length + ' ống');
+  OG.ong = s.ong.map(o => ({ x: o.x / k, y: o.y / k, r: o.r / k, khop: o.khop, doan: o.doan })); OG.rOng = s.r / k || OG.rOng;
+  if(OG.ong.length) OG.loiKhoanh = false;
+  OG.chanSau = '';
+  ongCapNhat(); toast('Đã khoanh lại: ' + OG.ong.length + ' ống');
 }
+/* Kiểm ảnh đầu vào: trả về danh sách lý do PHẢI CHỤP LẠI (có lý do thì không cho đếm, không đưa số) */
+function ongKiem(){
+  const B = [], W = OG.img.width, H = OG.img.height, G = OG.gao;
+  if(OG.loiKhoanh){ B.push('Không thấy gáo trong ảnh. Chụp lại: thẳng từ trên xuống, cả miệng gáo nằm trong khung.'); return B; }
+  const vuot = Math.max(-(G.x - G.r), -(G.y - G.r), G.x + G.r - W, G.y + G.r - H) / G.r;   // vòng gáo vượt mép ảnh bao nhiêu phần bán kính
+  if(vuot > TB.cutTol) B.push('Gáo bị cắt ở mép ảnh. Chụp lại cho cả gáo nằm trọn trong khung (nếu máy khoanh sai vòng gáo: bấm "Vòng gáo" để kéo lại).');
+  else if(OG.ong.some(o => o.x - o.r < 0 || o.y - o.r < 0 || o.x + o.r > W || o.y + o.r > H)) B.push('Có ống bị cắt ở mép ảnh. Chụp lại cho cả gáo nằm trọn trong khung.');
+  if(2 * G.r < TB.minGaoFrac * Math.min(W, H)) B.push('Chụp xa quá: gáo chỉ chiếm ' + Math.round(200 * G.r / Math.min(W, H)) + '% bề ngang ảnh. Đưa máy lại gần cho gáo gần kín khung rồi chụp lại.');
+  if(!OG.ong.length) B.push('Không thấy ống nào trong vòng gáo. Chụp lại (đủ sáng, chờ khói tan), hoặc kéo vòng gáo cho đúng rồi bấm "Khoanh lại ống".');
+  else if(OG.rOng * 2 < TB.minTubeD) B.push('Chụp xa quá: ống chỉ rộng khoảng ' + Math.round(OG.rOng * 2) + ' điểm ảnh (cần từ ' + TB.minTubeD + '), hoặc gáo không nằm trọn trong khung. Đưa máy lại gần, canh cả gáo vào khung rồi chụp lại.');
+  if(OG.sharp < TB.minSharp) B.push('Ảnh mờ (độ nét ' + OG.sharp.toFixed(1) + ', cần từ ' + TB.minSharp + '). Giữ yên máy, chạm vào gáo để lấy nét, chờ khói tan rồi chụp lại.');
+  if(OG.chanSau) B.push(OG.chanSau);
+  return B;
+}
+function vuotMep(){ const G = OG.gao; return Math.max(-(G.x - G.r), -(G.y - G.r), G.x + G.r - OG.img.width, G.y + G.r - OG.img.height) / G.r; }
+function ongChong(){ return OG.ong.filter(o => o.co && o.co.some(c => c.indexOf('chồng') >= 0)).length; }
+function ongXep(){                  // đánh số theo hàng từ trên xuống, trái sang phải
+  const h = Math.max(1, OG.rOng * 1.6), y0 = Math.min(...OG.ong.map(o => o.y));
+  OG.ong.sort((a, b) => Math.round((a.y - y0) / h) - Math.round((b.y - y0) / h) || a.x - b.x).forEach((o, i) => o.id = i + 1);
+}
+
+/* ---------- số liệu ---------- */
+const dotOn = d => !d.removed && (d.manual || d.confirmed || d.st !== 'maybe');
+const tubeCount = o => (o.dots || []).filter(dotOn).length;
+function tubeKq(o){
+  const n = tubeCount(o);
+  if(o.nguoi) return n === OG.cap ? 'xanh' : 'do';                      // người đã BẤM XÁC NHẬN: chỉ còn xanh/đỏ theo số
+  if(o.sua) return 'vang';                                                // đã sửa chấm nhưng chưa xác nhận: vẫn vàng
+  if(!o.them && o.n.every(v => v === 0)) return 'vang';                   // máy khoanh vì thấy có vật, nhưng không nhận ra cọng nào: KHÔNG được coi là "0 chắc chắn"
+  if(o.co && o.co.length) return 'vang';                                  // vòng bất thường
+  const same = o.n.every(v => v === o.n[0]);                               // các lần đếm khớp nhau
+  const lech = o.dots.some(d => !d.removed && !d.manual && !d.confirmed && d.st !== 'sure');
+  if(same && !lech) return n === OG.cap ? 'xanh' : 'do';                  // KHÔNG làm tròn về số chuẩn
+  return 'vang';
+}
+function ongTong(){
+  const T = { tong: 0, xanh: 0, do: 0, vang: 0, chac: 0, chuaChac: 0, mau: {}, nguoi: 0, batThuong: 0 };
+  for(const o of OG.ong){ const n = tubeCount(o), kq = tubeKq(o); T.tong += n; T[kq]++; if(kq === 'vang') T.chuaChac += n; else T.chac += n;
+    if(n) T.mau[o.mau] = (T.mau[o.mau] || 0) + n; if(o.nguoi) T.nguoi++; if(o.co && o.co.length) T.batThuong++; }
+  T.ngoai = OG.ngoaiOng.filter(d => !d.removed).length;
+  T.mauTxt = Object.keys(T.mau).sort((a, b) => T.mau[b] - T.mau[a]).map(m => m + ' ' + T.mau[m]).join('; ');
+  return T;
+}
+function tenMau(r, g, b){
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx, s = mx ? (mx - mn) / mx * 255 : 0; let h = 0;
+  if(mx !== mn){ const d = mx - mn; h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 30; if(h < 0) h += 180; }   // h theo thang 0..180 như OpenCV
+  if(s < 45) return v >= 120 ? 'trắng' : 'xám/tối';
+  if(h < 6 || h >= 165) return 'đỏ';
+  if(h < 19) return v < 140 ? 'nâu' : 'cam';
+  if(h < 35) return v < 110 ? 'nâu' : 'vàng';
+  if(h < 85) return 'xanh lá';
+  if(h < 135) return 'xanh dương';
+  return 'tím/hồng';
+}
+function ongMau(o){                 // màu cọng của ống = trung vị màu lõi các đầu cọng được tính
+  const D = OG.small, k = OG.k, R = [], Gc = [], Bc = [];
+  for(const d of o.dots){ if(!dotOn(d)) continue; const x = Math.round(d.x * k), y = Math.round(d.y * k); if(x < 1 || y < 1 || x >= D.width - 1 || y >= D.height - 1) continue;
+    let r = 0, g = 0, b = 0; for(let dy = -1; dy <= 1; dy++) for(let dx = -1; dx <= 1; dx++){ const i = ((y + dy) * D.width + x + dx) * 4; r += D.data[i]; g += D.data[i + 1]; b += D.data[i + 2]; }
+    R.push(r / 9); Gc.push(g / 9); Bc.push(b / 9); }
+  return R.length ? tenMau(median(R), median(Gc), median(Bc)) : 'không rõ';
+}
+
+/* ---------- Bước 3: đếm từng ống ---------- */
+async function inferCanvas(c){      // chạy mô hình trên khung 960×960 có sẵn, trả khung theo toạ độ của khung
+  const S = CONFIG.size, d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, S, S).data, n = S * S, t = new Float32Array(3 * n);
+  for(let i = 0, j = 0; i < n; i++, j += 4){ t[i] = d[j] / 255; t[n + i] = d[j + 1] / 255; t[2 * n + i] = d[j + 2] / 255; }
+  const out = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', t, [1, 3, S, S]) });
+  const o = out[session.outputNames[0]], [, C, N] = o.dims, a = o.data, res = [];
+  for(let i = 0; i < N; i++){
+    let s = 0; for(let q = 4; q < C; q++) s = Math.max(s, a[q * N + i]);
+    if(s < TB.conf - TB.band) continue;
+    res.push({ x: a[i], y: a[N + i], w: a[2 * N + i], h: a[3 * N + i], s });
+  }
+  return res;
+}
+function ongGanNhat(x, y){ let b = null, bd = 1e18; for(const o of OG.ong){ const d = (o.x - x) * (o.x - x) + (o.y - y) * (o.y - y); if(d < bd){ bd = d; b = o; } } return b; }
+const ongRIn = o => 1.08 * Math.max(o.r, Math.min(o.r0 || o.r, OG.rOng));
+/* Một lần đếm: cắt từng ống từ ảnh, chỉnh về cỡ mô hình nhận tốt, xếp 16 ống vào một khung. Trả về mảng khung theo từng ống. */
+async function ongDemLuot(pi, list, onStep){
+  const P = TB.passes[pi], S = CONFIG.size, cell = TB.cell, nc = S / cell, img = OG.img, f = P.f / OG.rOng, [m00, m01, m10, m11] = P.M;
+  const c = document.createElement('canvas'); c.width = S; c.height = S; const x = c.getContext('2d', { willReadFrequently: true });
+  const res = list.map(() => []);
+  for(let b0 = 0; b0 < list.length; b0 += TB.per){
+    if(onStep) await onStep(b0);
+    const part = list.slice(b0, b0 + TB.per);
+    x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = 'rgb(114,114,114)'; x.fillRect(0, 0, S, S); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+    const meta = part.map((o, j) => {
+      const cx = o.x + P.lech * OG.rOng, cy = o.y - P.lech * OG.rOng, Cx = (j % nc) * cell + cell / 2, Cy = Math.floor(j / nc) * cell + cell / 2;
+      x.save(); x.beginPath(); x.rect(Cx - cell / 2, Cy - cell / 2, cell, cell); x.clip();
+      x.setTransform(f * m00, f * m10, f * m01, f * m11, Cx - f * (m00 * cx + m01 * cy), Cy - f * (m10 * cx + m11 * cy));
+      const h = cell / 2 / f + 2, sx = Math.max(0, Math.floor(cx - h)), sy = Math.max(0, Math.floor(cy - h)), ex = Math.min(img.width, Math.ceil(cx + h)), ey = Math.min(img.height, Math.ceil(cy + h));
+      if(ex > sx && ey > sy) x.drawImage(img, sx, sy, ex - sx, ey - sy, sx, sy, ex - sx, ey - sy);   // chỉ vẽ phần nằm trong ảnh (Safari không vẽ khi vùng nguồn tràn mép)
+      x.restore();
+      return { cx, cy, Cx, Cy };
+    });
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    for(const b of await inferCanvas(c)){
+      const j = Math.floor(b.y / cell) * nc + Math.floor(b.x / cell); if(j < 0 || j >= meta.length) continue;
+      const m = meta[j], u = b.x - m.Cx, v = b.y - m.Cy;
+      if(Math.abs(u) + b.w / 2 > cell / 2 - 2 || Math.abs(v) + b.h / 2 > cell / 2 - 2) continue;       // khung chạm mép ô
+      const px = m.cx + (m00 * u + m10 * v) / f, py = m.cy + (m01 * u + m11 * v) / f, o = part[j];
+      if(Math.hypot(px - o.x, py - o.y) > ongRIn(o) || ongGanNhat(px, py) !== o) continue;              // cọng chỉ tính khi nằm trong vòng ống của chính nó
+      res[b0 + j].push({ x: px, y: py, w: (m01 ? b.h : b.w) / f, h: (m01 ? b.w : b.h) / f, s: b.s });
+    }
+  }
+  return res.map(L => nms(L));
+}
+async function ongDem(){
+  if(!OG.img) return;
+  const B = ongKiem(); if(B.length){ toast('Chưa đếm được – ' + B[0], 5000); return; }
+  if(ongChong()){ toast('Còn vòng ống chồng nhau (viền đỏ). Kéo tách ra hoặc xóa bớt rồi mới đếm.', 4500); return; }
+  if(!session){ toast('Mô hình chưa tải xong, chờ vài giây rồi bấm lại.'); return; }
+  busy(true, 'Đang đếm từng ống…'); await sleep(30);
+  try{
+    const t0 = performance.now(), conf = TB.conf, hi = conf + TB.band, nL = Math.ceil(OG.ong.length / TB.per);
+    ongXep(); let luot = 0;
+    const step = lan => async b0 => { $('busyText').textContent = `Đang đếm từng ống – lần ${lan}, nhóm ${b0 / TB.per + 1}/${nL}…`; await sleep(15); };
+    const p1 = await ongDemLuot(0, OG.ong, step(1)), p2 = await ongDemLuot(1, OG.ong, step(2)); luot += 2 * nL;
+    const all = p1.flat().filter(d => d.s >= hi);
+    OG.head = all.length >= 5 ? median(all.map(d => Math.max(d.w, d.h))) : OG.rOng / 2.87;
+    const near = OG.head * 0.5, co = (L, d, thr) => L.some(e => e.s >= thr && Math.hypot(e.x - d.x, e.y - d.y) < near);
+    const dem = L => L.filter(d => d.s >= conf).length;
+    const sure1 = (a, bb) => a.every(d => d.s < conf - TB.band || d.s >= hi) && a.filter(d => d.s >= hi).every(d => co(bb, d, conf)) && bb.filter(d => d.s >= conf).every(d => co(a, d, conf));
+    // lần 3: mọi ống CHƯA chắc (hai lần đầu khác nhau, khác số chuẩn, có cọng điểm thấp, hoặc vòng bất thường)
+    const can3 = OG.ong.filter((o, i) => !(dem(p1[i]) === OG.cap && dem(p2[i]) === OG.cap && sure1(p1[i], p2[i]) && !(o.co && o.co.length)));
+    const p3s = can3.length ? await ongDemLuot(2, can3, async b0 => { $('busyText').textContent = `Đang đếm lại các ống chưa chắc – lần 3, nhóm ${b0 / TB.per + 1}/${Math.ceil(can3.length / TB.per)}…`; await sleep(15); }) : [];
+    luot += Math.ceil(can3.length / TB.per);
+    // Kiểm sau lượt đếm đầu: các vòng máy khoanh (có vật) mà gần như không nhận ra cọng nào -> ảnh nhòe/khói dày/không phải gáo/màu chưa học: KHÔNG đưa số
+    const may = OG.ong.map((o, i) => o.them ? -1 : dem(p1[i])).filter(v => v >= 0), tb = may.length ? may.reduce((a, b) => a + b, 0) / may.length : OG.cap;
+    if(may.length && tb < 0.15 * OG.cap){
+      OG.chanSau = `Máy không nhận ra cọng tinh trong các ống (trung bình ${tb.toFixed(1)} cọng/ống ở ${may.length} ống). Ảnh nhòe, khói dày, không phải ảnh gáo, hoặc màu cọng mô hình chưa học. Chụp lại rõ hơn; nếu vẫn vậy thì ảnh này phải đếm tay.`;
+      OG.ong.forEach(o => { delete o.dots; delete o.n; }); OG.tDem = performance.now() - t0; ongCapNhat(); busy(false); window.scrollTo(0, 0); return;
+    }
+    OG.ong.forEach((o, i) => {
+      const a = p1[i], others = [p2[i]]; const i3 = can3.indexOf(o); if(i3 >= 0) others.push(p3s[i3]);
+      o.n = [dem(a)].concat(others.map(dem));
+      o.dots = a.map(d => ({ x: d.x, y: d.y, w: d.w, h: d.h, s: d.s,
+        st: d.s < conf ? 'maybe' : (d.s >= hi && others.every(L => co(L, d, conf))) ? 'sure' : 'unsure' }));
+      for(const L of others) for(const d of L){ if(d.s < conf) continue;           // cọng chỉ thấy ở lần đếm khác -> chấm "nghi", chưa tính
+        if(!o.dots.some(e => Math.hypot(e.x - d.x, e.y - d.y) < near)) o.dots.push({ x: d.x, y: d.y, w: d.w, h: d.h, s: d.s, st: 'maybe', khac: true }); }
+      o.nMay = tubeCount(o); o.nguoi = false; o.sua = false; o.mau = ongMau(o);
+    });
+    // lượt cả gáo: tìm cọng nằm NGOÀI mọi ống (đánh dấu tím, đếm riêng, không cộng vào ống)
+    $('busyText').textContent = 'Đang tìm cọng nằm ngoài ống…'; await sleep(15);
+    const G = OG.gao, sx = Math.max(0, G.x - G.r), sy = Math.max(0, G.y - G.r), ex = Math.min(OG.img.width, G.x + G.r), ey = Math.min(OG.img.height, G.y + G.r);
+    const whole = nms(await detect(OG.img, sx, sy, ex - sx, ey - sy)); luot++;
+    OG.ngoaiOng = whole.filter(d => d.s >= hi && Math.hypot(d.x - G.x, d.y - G.y) <= G.r && !OG.ong.some(o => Math.hypot(d.x - o.x, d.y - o.y) <= ongRIn(o) * 1.07));
+    OG.tDem = performance.now() - t0; OG.luot = luot; OG.phase = 'ketqua'; OG.saved = false; ocv.style.touchAction = 'manipulation';
+    ongCapNhat(); window.scrollTo(0, 0);
+  }catch(e){ console.error(e); toast('Lỗi khi đếm: ' + (e.message || e), 6000); }
+  busy(false);
+}
+
+/* ---------- hiển thị ---------- */
 function ongCapNhat(){
   KHOANH.danhDau(OG.ong, OG.gao, OG.rOng);
-  // đánh số theo hàng từ trên xuống, trái sang phải
-  const bt = OG.ong.filter(o => o.co.length), chong = OG.ong.filter(o => o.co.some(c => c.indexOf('chồng') >= 0)).length;
-  $('ongN').textContent = OG.ong.length;
-  let h = `<span class="chip">${OG.ong.length - bt.length} ống bình thường</span>`;
-  if(bt.length) h += `<span class="chip" style="border-color:#e04cff">${bt.length} ống bất thường (viền tím)</span>`;
-  if(chong) h += `<span class="chip" style="border-color:#ff3b30">${chong} vòng chồng nhau (viền đỏ)</span>`;
-  $('ongChips').innerHTML = h;
-  const nguon = OG.gao.nguon === 'cạnh' ? 'theo mép nhìn thấy' : OG.gao.nguon === 'ôm sát các ống' ? 'vẽ ôm sát các ống' : OG.gao.nguon === 'tay' ? 'người chỉnh' : 'ước lượng';
-  const dk = Math.round(OG.rOng * 2);
-  let w = OG.ghiChu.map(t => `<div class="warnbox">${t}</div>`).join('');
+  if(OG.phase === 'khoanh' && !OG.drag && OG.ong.length) ongXep();
+  const kq = OG.phase === 'ketqua'; $('ongP1').classList.toggle('hidden', kq); $('ongP2').classList.toggle('hidden', !kq);
+  const esc = t => String(t).replace(/</g, '&lt;'), box = t => `<div class="warnbox">${t}</div>`;
+  const bt = OG.ong.filter(o => o.co.length), chong = ongChong(), dk = Math.round(OG.rOng * 2);
   const lydo = {}; bt.forEach(o => o.co.forEach(c => { const t = c.split(' (')[0]; lydo[t] = (lydo[t] || 0) + 1; }));
-  if(bt.length) w += `<div class="warnbox">Ống bất thường: ${Object.keys(lydo).map(t => lydo[t] + ' ' + t).join('; ')}. Máy KHÔNG tự xóa – anh xem rồi kéo, xóa hoặc để nguyên.</div>`;
-  $('ongWarns').innerHTML = w;
-  $('ongInfo').textContent = `Vòng gáo nhựa (xanh lá): ${nguon}. Đường kính ống trong ảnh ≈ ${dk} px. Máy khoanh mất ${(OG.ms / 1000).toFixed(1)} giây. Bước đếm cọng: bản sau.`;
+  let w = '', chips = '', sum = '';
+  if(!kq){
+    const B = ongKiem();
+    $('ongStep').textContent = 'Bước 1–2: xem và sửa vòng gáo, vòng ống';
+    $('ongHead').innerHTML = B.length ? '<span style="font-size:26px;color:var(--bad)">Chụp lại</span>' : `<small style="margin:0 6px 0 0">Máy thấy</small><span id="ongN">${OG.ong.length}</span><small>ống</small>`;
+    $('ongBlock').innerHTML = B.map(t => `<div class="warnbox" style="background:#fde3e3;color:#8a1c1c;border-color:#f1a3a3"><b>CHỤP LẠI – chưa đếm.</b> ${t}</div>`).join('');
+    if(!B.length){
+      chips = `<span class="chip">${OG.ong.length - bt.length} ống bình thường</span>`;
+      if(bt.length) chips += `<span class="chip" style="border-color:#e04cff">${bt.length} bất thường (tím)</span>`;
+      if(chong) chips += `<span class="chip" style="border-color:#ff3b30">${chong} vòng chồng nhau (đỏ)</span>`;
+      if(OG.exp && OG.exp !== OG.ong.length) sum += box(`⚠ Sổ ghi <b>${OG.exp} ống</b>, máy thấy <b>${OG.ong.length}</b>. Bấm <b>Thêm</b> rồi chạm vào ống bị sót, hoặc <b>Xóa</b> vòng thừa.`);
+      else if(OG.exp) sum += `<div class="hint">Số ống khớp sổ: <b>${OG.exp}</b>.</div>`;
+      if(vuotMep() > 0.03) w += box('Vòng gáo nằm sát/lấn mép ảnh một chút. Nếu gáo thật bị cắt ở mép thì chụp lại; nếu chỉ do vòng vẽ rộng thì cứ đếm.');
+      w += OG.ghiChu.map(box).join('');
+      if(bt.length) w += box(`Ống bất thường: ${Object.keys(lydo).map(t => lydo[t] + ' ' + t).join('; ')}. Máy KHÔNG tự xóa – anh xem rồi kéo, xóa hoặc để nguyên (ống bất thường sẽ ra VÀNG).`);
+      if(dk < TB.softTubeD) w += box(`Ống trong ảnh rộng ≈ ${dk} điểm ảnh (nên từ ${TB.softTubeD}): ảnh nhỏ hoặc đã bị nén (WhatsApp/Zalo) – máy vẫn đếm nhưng sẽ nhiều ống VÀNG. Nên dùng ảnh gốc, gáo kín khung.`);
+    }
+    $('ongDem').disabled = B.length > 0; $('ongDem').style.opacity = B.length ? .45 : 1;
+    const nguon = OG.gao.nguon === 'cạnh' ? 'theo mép nhìn thấy' : OG.gao.nguon === 'ôm sát các ống' ? 'vẽ ôm sát các ống' : OG.gao.nguon === 'tay' ? 'anh đã chỉnh' : 'ước lượng';
+    $('ongInfo').textContent = `Vòng gáo nhựa: ${nguon}. Độ nét ${OG.sharp.toFixed(1)}. Máy khoanh mất ${(OG.ms / 1000).toFixed(1)} giây. ${OG.img.width}×${OG.img.height}.`;
+  }else{
+    const T = ongTong();
+    $('ongStep').textContent = 'Bước 3: kết quả đếm từng ống' + (OG.saved ? ' · đã lưu' : '');
+    $('ongHead').innerHTML = `<span id="ongTotal">${T.tong}</span><small>cọng / ${OG.ong.length} ống</small>`;
+    $('ongBlock').innerHTML = '';
+    chips = `<span class="chip"><span class="dot" style="background:${MAU_KQ.xanh}"></span>Xanh <b id="cXanh">${T.xanh}</b></span>` +
+      `<span class="chip"><span class="dot" style="background:${MAU_KQ.do}"></span>Đỏ <b id="cDo">${T.do}</b></span>` +
+      `<span class="chip"><span class="dot" style="background:${MAU_KQ.vang}"></span>Vàng <b id="cVang">${T.vang}</b></span>`;
+    sum += `<div class="hint" style="margin-top:8px">Theo màu cọng: <b id="ongMauTxt">${esc(T.mauTxt || '—')}</b></div>`;
+    sum += `<div class="hint">Chắc chắn (xanh + đỏ): <b id="ongChac">${T.chac}</b> · chưa chắc (vàng): <b id="ongChuaChac">${T.chuaChac}</b> · số chuẩn ${OG.cap}/ống</div>`;
+    if(T.ngoai) sum += box(`⚠ Có <b id="ongNgoai">${T.ngoai}</b> cọng nằm NGOÀI mọi ống (vòng tím) – đếm riêng, <b>chưa cộng</b> vào tổng. ${T.ngoai >= 8 ? 'Nhiều như vậy có thể là sót ống: bấm "Sửa vòng ống" để thêm vòng.' : 'Hãy kiểm tra trực tiếp.'}`);
+    if(OG.exp && OG.exp !== OG.ong.length) sum += box(`⚠ Sổ ghi <b>${OG.exp} ống</b>, đang đếm <b>${OG.ong.length}</b> ống.`);
+    if(T.batThuong) w += box(`${T.batThuong} ống có vòng bất thường (nét đứt) nên để VÀNG.`);
+    if(dk < TB.softTubeD) w += box(`Ảnh nhỏ/đã nén (ống ≈ ${dk} điểm ảnh): số của ống VÀNG chỉ để tham khảo, phải xem chấm.`);
+    const can = OG.ong.filter(o => tubeKq(o) !== 'xanh');
+    $('ongCanN').textContent = can.length ? `${can.length} ống đỏ/vàng – chạm để mở` : 'Không còn ống đỏ/vàng.';
+    $('ongCan').innerHTML = can.map(o => { const q = tubeKq(o); return `<button type="button" data-id="${o.id}" style="border:2px solid ${MAU_KQ[q]};background:var(--card);color:var(--ink);border-radius:10px;padding:8px 10px;font-size:15px;font-weight:700;min-width:64px">#${o.id}: ${tubeCount(o)}</button>`; }).join('');
+    $('ongCham').textContent = OG.chamXanh ? 'Ẩn chấm ở ống xanh' : 'Hiện chấm ở ống xanh';
+    $('ongInfo').textContent = `Đếm mất ${(OG.tDem / 1000).toFixed(1)} giây (${OG.luot} lượt mô hình) · đầu cọng ≈ ${Math.round(OG.head)} điểm ảnh · ${OG.img.width}×${OG.img.height}` + (T.nguoi ? ` · ${T.nguoi} ống anh đã soát` : '');
+  }
+  $('ongChips').innerHTML = chips; $('ongSum').innerHTML = sum; $('ongWarns').innerHTML = w; $('ongNote').classList.toggle('hidden', !w && !$('ongInfo').textContent);
   ongVe();
 }
+function veCham(ctx, d, x, y, r, lw){
+  if(d.removed){ ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); ctx.stroke(); return; }
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7);
+  if(!dotOn(d)){ ctx.lineWidth = lw * 1.4; ctx.strokeStyle = '#ff2bd6'; ctx.stroke(); return; }
+  ctx.fillStyle = d.manual ? '#2f86ff' : (d.st === 'sure' || d.confirmed) ? '#fff' : '#ff2bd6'; ctx.fill();
+  ctx.lineWidth = lw; ctx.strokeStyle = '#000'; ctx.stroke();
+}
 function ongVe(){
-  const W = ocv.width, H = ocv.height, lw = Math.max(2, Math.round(Math.max(W, H) / 400)); og.drawImage(OG.img, 0, 0);
-  if(OG.ngoai){ og.setLineDash([lw * 3, lw * 3]); og.strokeStyle = 'rgba(160,190,255,.8)'; og.lineWidth = lw; og.beginPath(); og.arc(OG.ngoai.x, OG.ngoai.y, OG.ngoai.r, 0, 7); og.stroke(); og.setLineDash([]); }
-  const G = OG.gao; og.strokeStyle = (G.nguon === 'cạnh' || G.nguon === 'tay') ? '#22e06a' : '#ffe14a'; og.lineWidth = lw * 2;
+  if(!OG.img) return;
+  const W = ocv.width, H = ocv.height, lw = Math.max(2, Math.round(Math.max(W, H) / 400)), kq = OG.phase === 'ketqua'; og.setTransform(1, 0, 0, 1, 0, 0); og.drawImage(OG.img, 0, 0);
+  if(OG.ngoai && !kq){ og.setLineDash([lw * 3, lw * 3]); og.strokeStyle = 'rgba(160,190,255,.8)'; og.lineWidth = lw; og.beginPath(); og.arc(OG.ngoai.x, OG.ngoai.y, OG.ngoai.r, 0, 7); og.stroke(); og.setLineDash([]); }
+  const G = OG.gao; og.strokeStyle = kq ? 'rgba(255,255,255,.75)' : (G.nguon === 'cạnh' || G.nguon === 'tay') ? '#22e06a' : '#ffe14a'; og.lineWidth = kq ? lw : lw * 2;
   if(G.nguon !== 'cạnh' && G.nguon !== 'tay') og.setLineDash([lw * 6, lw * 3]);
   og.beginPath(); og.arc(G.x, G.y, G.r, 0, 7); og.stroke(); og.setLineDash([]);
-  if(OG.tool === 'gao'){ og.fillStyle = '#22e06a'; og.beginPath(); og.arc(G.x + G.r * .7071, G.y + G.r * .7071, lw * 5, 0, 7); og.fill(); og.strokeStyle = '#fff'; og.lineWidth = lw; og.stroke(); }
-  og.font = `bold ${Math.max(14, Math.round(OG.rOng * .55))}px system-ui,sans-serif`; og.textAlign = 'center'; og.textBaseline = 'middle';
+  if(!kq && OG.tool === 'gao'){ const N = gaoNum(), nr = Math.max(lw * 5, OG.rOng * .6); og.fillStyle = '#22e06a'; og.beginPath(); og.arc(N.x, N.y, nr, 0, 7); og.fill(); og.strokeStyle = '#fff'; og.lineWidth = lw * 1.5; og.stroke();
+    og.strokeStyle = '#fff'; og.lineWidth = lw * 1.5; og.beginPath(); const a = nr * .5, ux = (N.x - G.x) / (Math.hypot(N.x - G.x, N.y - G.y) || 1), uy = (N.y - G.y) / (Math.hypot(N.x - G.x, N.y - G.y) || 1); og.moveTo(N.x - ux * a, N.y - uy * a); og.lineTo(N.x + ux * a, N.y + uy * a); og.stroke(); }
+  const fs = Math.max(14, Math.round(OG.rOng * (kq ? .62 : .55)));
+  og.textAlign = 'center'; og.textBaseline = 'middle';
   OG.ong.forEach((o, i) => {
-    const chong = o.co.some(c => c.indexOf('chồng') >= 0);
-    og.lineWidth = lw * 1.5; og.strokeStyle = chong ? '#ff3b30' : o.co.length ? '#e04cff' : '#35e0f0';
+    const chong = o.co.some(c => c.indexOf('chồng') >= 0), q = kq ? tubeKq(o) : null;
+    og.lineWidth = lw * (kq ? 2 : 1.5); og.strokeStyle = kq ? MAU_KQ[q] : chong ? '#ff3b30' : o.co.length ? '#e04cff' : '#35e0f0';
     if(o.co.length && !chong) og.setLineDash([lw * 4, lw * 2]);
     og.beginPath(); og.arc(o.x, o.y, o.r, 0, 7); og.stroke(); og.setLineDash([]);
-    og.lineWidth = lw * 2; og.strokeStyle = 'rgba(0,0,0,.75)'; og.strokeText(i + 1, o.x, o.y); og.fillStyle = '#fff'; og.fillText(i + 1, o.x, o.y);
+    if(kq && (q !== 'xanh' || OG.chamXanh)) for(const d of o.dots) if(!d.removed) veCham(og, d, d.x, d.y, Math.max(2.5, OG.head * .15), Math.max(1, lw * .5));
+    const txt = kq ? (o.nguoi ? '✓' : '') + tubeCount(o) : String(i + 1);
+    og.font = `800 ${fs}px -apple-system,system-ui,sans-serif`;
+    og.lineWidth = fs * .24; og.strokeStyle = 'rgba(0,0,0,.85)'; og.strokeText(txt, o.x, o.y); og.fillStyle = kq ? MAU_KQ[q] : '#fff'; og.fillText(txt, o.x, o.y);
+    if(kq){ og.font = `700 ${Math.round(fs * .5)}px -apple-system,system-ui,sans-serif`; og.lineWidth = fs * .12; og.strokeText('#' + o.id, o.x, o.y - o.r * .7); og.fillStyle = '#fff'; og.fillText('#' + o.id, o.x, o.y - o.r * .7); }
   });
+  if(!kq && OG.drag && OG.drag.i != null && OG.drag.px != null){     // kính lúp: phóng to 2 lần vùng quanh vòng đang kéo, đặt phía trên (hoặc dưới) ngón tay
+    const o = OG.ong[OG.drag.i], s = Math.max(o.r, OG.rOng) * 2.1, R = s * 2;
+    let cx = Math.min(W - R - lw, Math.max(R + lw, OG.drag.px)), cy = OG.drag.py - R - s * 1.2; if(cy - R < lw) cy = OG.drag.py + R + s * 1.2; cy = Math.min(H - R - lw, Math.max(R + lw, cy));
+    const sx = Math.max(0, Math.min(W - 2 * s, o.x - s)), sy = Math.max(0, Math.min(H - 2 * s, o.y - s));
+    let snap = OG._lup; if(!snap){ snap = OG._lup = document.createElement('canvas'); } snap.width = Math.ceil(2 * s); snap.height = Math.ceil(2 * s);
+    snap.getContext('2d').drawImage(ocv, sx, sy, 2 * s, 2 * s, 0, 0, snap.width, snap.height);
+    og.save(); og.beginPath(); og.arc(cx, cy, R, 0, 7); og.clip(); og.drawImage(snap, cx - R, cy - R, 2 * R, 2 * R); og.restore();
+    og.lineWidth = lw * 2; og.strokeStyle = '#fff'; og.beginPath(); og.arc(cx, cy, R, 0, 7); og.stroke(); }
+  if(kq){ og.lineWidth = lw * 1.5; og.strokeStyle = '#c45cff'; for(const d of OG.ngoaiOng){ if(d.removed) continue; og.beginPath(); og.arc(d.x, d.y, OG.head * .8, 0, 7); og.stroke(); } }
 }
+
+/* ---------- sửa vòng (bước 1–2) ---------- */
 function ongTool(t){
   OG.tool = t; document.querySelectorAll('#ongTools button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
-  ocv.style.touchAction = t === 'xem' ? 'auto' : 'none';
-  $('ongHint').textContent = { xem: 'Xem: vuốt để cuộn ảnh, bấm + / − để phóng.', ong: 'Kéo ống: đặt ngón tay vào vòng ống rồi kéo tới đúng chỗ.',
-    them: 'Thêm ống: chạm vào giữa ống bị sót.', xoa: 'Xóa ống: chạm vào vòng thừa.', gao: 'Vòng gáo: kéo ở giữa để dời, kéo chấm xanh ở mép để đổi cỡ. Xong bấm "Khoanh lại ống" nếu muốn máy tìm lại ống trong vòng mới.' }[t];
+  ocv.style.touchAction = (OG.phase === 'ketqua' || t === 'xem') ? 'manipulation' : 'none';
+  $('ongHint').textContent = { xem: 'Xem: vuốt để cuộn ảnh, bấm + / − để phóng.', ong: 'Kéo ống: đặt ngón tay vào vòng ống rồi kéo; vòng không đè lên ống khác, ô phóng to hiện phía trên ngón tay.',
+    them: 'Thêm ống: chạm vào giữa ống bị sót (kể cả ống rỗng).', xoa: 'Xóa ống: chạm vào vòng thừa.', gao: 'Vòng gáo: đặt ngón tay ở BẤT KỲ chỗ nào rồi kéo để DỜI vòng; kéo NÚM XANH TO trên vòng để đổi cỡ. Xong bấm "Khoanh lại ống" nếu muốn máy tìm lại ống trong vòng mới.' }[t];
   if(OG.img) ongVe();
+}
+function gaoNum(){            // vị trí núm đổi cỡ: 1 trong 4 góc chéo của vòng gáo, chọn góc nằm trong ảnh và gần giữa ảnh nhất
+  const G = OG.gao, W = ocv.width, H = ocv.height, m = OG.rOng * .6; let b = null, bd = 1e18;
+  for(const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]){ const x = G.x + sx * G.r * .7071, y = G.y + sy * G.r * .7071;
+    const ngoai = Math.max(0, m - x, x - (W - m)) + Math.max(0, m - y, y - (H - m)), d = ngoai * 1e6 + Math.hypot(x - W / 2, y - H / 2) - (sx > 0 && sy > 0 ? 1 : 0);
+    if(d < bd){ bd = d; b = { x: Math.min(W - m, Math.max(m, x)), y: Math.min(H - m, Math.max(m, y)) }; } }
+  return b;
+}
+function ongDay(o, px, py){    // không cho vòng đang kéo đè lên vòng khác: đẩy ra sát mép vòng bên cạnh (trượt quanh); hết chỗ thì đứng yên ở vị trí hợp lệ trước đó
+  const mn = q => q.tay ? o.r + q.r : Math.min(o.r + (q.r0 || q.r), 2 * o.r);
+  const lun = () => { let m = 0; for(const q of OG.ong){ if(q === o) continue; m = Math.max(m, mn(q) - Math.hypot(o.x - q.x, o.y - q.y)); } return m; };
+  const x1 = o.x, y1 = o.y; o.x = px; o.y = py; const truoc = lun(); o.x = x1; o.y = y1;
+  for(let it = 0; it < 8; it++){ let dung = false;
+    for(const q of OG.ong){ if(q === o) continue; const dx = o.x - q.x, dy = o.y - q.y, d = Math.hypot(dx, dy), m = mn(q) + .01;
+      if(d < m){ dung = true; if(d < 1e-3) o.x += m; else { o.x = q.x + dx / d * m; o.y = q.y + dy / d * m; } } }
+    if(!dung) break; }
+  const sau = lun(); if(sau > .5 && sau >= truoc - 1e-6){ o.x = px; o.y = py; }
 }
 function ongPt(ev){ const r = ocv.getBoundingClientRect(); return { x: (ev.clientX - r.left) * ocv.width / r.width, y: (ev.clientY - r.top) * ocv.height / r.height }; }
 function ongGan(p){ let b = -1, bd = 1e9; OG.ong.forEach((o, i) => { const d = Math.hypot(o.x - p.x, o.y - p.y); if(d < Math.max(o.r, OG.rOng * .7) && d < bd){ bd = d; b = i; } }); return b; }
 ocv.addEventListener('pointerdown', ev => {
-  if(!OG.img || OG.tool === 'xem') return; const p = ongPt(ev);
-  if(OG.tool === 'ong'){ const i = ongGan(p); if(i >= 0){ OG.drag = { i, dx: OG.ong[i].x - p.x, dy: OG.ong[i].y - p.y }; ocv.setPointerCapture(ev.pointerId); } }
-  else if(OG.tool === 'them'){ OG.ong.push({ x: p.x, y: p.y, r: OG.rOng, r0: OG.rOng, khop: null, tay: true, them: true }); ongCapNhat(); }
-  else if(OG.tool === 'xoa'){ const i = ongGan(p); if(i >= 0){ OG.ong.splice(i, 1); ongCapNhat(); } }
+  if(!OG.img || OG.phase !== 'khoanh' || OG.tool === 'xem') return; const p = ongPt(ev);
+  if(OG.tool === 'ong'){ const i = ongGan(p); if(i >= 0){ OG.drag = { i, dx: OG.ong[i].x - p.x, dy: OG.ong[i].y - p.y }; try{ ocv.setPointerCapture(ev.pointerId); }catch(e){} } }
+  else if(OG.tool === 'them'){ OG.ong.push({ x: p.x, y: p.y, r: OG.rOng, r0: OG.rOng, khop: null, tay: true, them: true }); OG.chanSau = ''; if(OG.gao.nguon === 'tay') OG.loiKhoanh = false; ongCapNhat(); }
+  else if(OG.tool === 'xoa'){ const i = ongGan(p); if(i >= 0){ OG.ong.splice(i, 1); OG.chanSau = ''; ongCapNhat(); } }
   else if(OG.tool === 'gao'){ const G = OG.gao, d = Math.hypot(p.x - G.x, p.y - G.y);
-    OG.drag = Math.abs(d - G.r) < Math.max(G.r * .12, 30) ? { cỡ: 1 } : { gx: G.x - p.x, gy: G.y - p.y }; ocv.setPointerCapture(ev.pointerId); }
+    const N = gaoNum(); OG.drag = Math.hypot(p.x - N.x, p.y - N.y) < Math.max(OG.rOng * 1.1, G.r * .16) ? { co: 1 } : { gx: G.x - p.x, gy: G.y - p.y }; try{ ocv.setPointerCapture(ev.pointerId); }catch(e){} }
   ev.preventDefault();
 });
 ocv.addEventListener('pointermove', ev => {
   if(!OG.drag) return; const p = ongPt(ev), D = OG.drag;
-  if(D.i != null){ const o = OG.ong[D.i]; o.x = p.x + D.dx; o.y = p.y + D.dy; o.khop = null; if(!o.tay){ o.tay = true; o.r = o.r0 || o.r; } KHOANH.danhDau(OG.ong, OG.gao, OG.rOng); }
-  else { const G = OG.gao; if(D.cỡ) G.r = Math.max(40, Math.hypot(p.x - G.x, p.y - G.y)); else { G.x = p.x + D.gx; G.y = p.y + D.gy; } G.nguon = 'tay'; KHOANH.danhDau(OG.ong, OG.gao, OG.rOng); }
+  if(D.i != null){ const o = OG.ong[D.i], px = o.x, py = o.y; o.x = p.x + D.dx; o.y = p.y + D.dy; o.khop = null; o.doan = 0; o.tay = true; ongDay(o, px, py); D.px = p.x; D.py = p.y; KHOANH.danhDau(OG.ong, OG.gao, OG.rOng); }
+  else { const G = OG.gao; if(D.co) G.r = Math.max(40, Math.hypot(p.x - G.x, p.y - G.y)); else { G.x = p.x + D.gx; G.y = p.y + D.gy; } G.nguon = 'tay'; KHOANH.danhDau(OG.ong, OG.gao, OG.rOng); }
   ongVe(); ev.preventDefault();
 });
-const ongTha = () => { if(OG.drag){ OG.drag = null; ongCapNhat(); } };
+const ongTha = () => { if(OG.drag){ OG.drag = null; OG.chanSau = ''; ongCapNhat(); } };
 ocv.addEventListener('pointerup', ongTha); ocv.addEventListener('pointercancel', ongTha);
+// bước 3: chạm vào ống để mở màn hình một ống
+ocv.addEventListener('click', ev => {
+  if(!OG.img || OG.phase !== 'ketqua') return; const p = ongPt(ev), i = ongGan(p);
+  if(i >= 0) tubeMo(OG.ong[i].id);
+});
 document.querySelectorAll('#ongTools button').forEach(b => b.onclick = () => ongTool(b.dataset.t));
 function ongZoom(f){ OG.zoom = Math.max(1, Math.min(4, OG.zoom * f)); ocv.style.width = (OG.zoom * 100) + '%'; }
-$('ongZi').onclick = () => ongZoom(1.4); $('ongZo').onclick = () => ongZoom(1 / 1.4);
+$('ongZi').onclick = $('ongZi2').onclick = () => ongZoom(1.4); $('ongZo').onclick = $('ongZo2').onclick = () => ongZoom(1 / 1.4);
 $('ongLai').onclick = ongKhoanhLai;
-$('ongMay').onclick = () => { const m = JSON.parse(JSON.stringify(OG.kqMay)); OG.ngoai = m.ngoai; OG.gao = m.gao; OG.ong = m.ong; OG.rOng = m.rOng; ongCapNhat(); toast('Đã trả về kết quả máy khoanh'); };
-$('ongMoi').onclick = () => { OG.img = null; OG.small = null; show('home'); };
-$('ongDem').onclick = () => toast('Bước đếm cọng: bản sau (chờ chủ dự án duyệt bước khoanh).');
-window.__ong = () => ({ ban: BAN_THU, k: OG.k, ngoai: OG.ngoai, gao: OG.gao, rOng: OG.rOng, ong: OG.ong.map(o => ({ x: o.x, y: o.y, r: o.r, co: o.co })) });
+$('ongMay').onclick = () => { const m = JSON.parse(JSON.stringify(OG.kqMay)); OG.ngoai = m.ngoai; OG.gao = m.gao; OG.ong = m.ong; OG.rOng = m.rOng; OG.loiKhoanh = m.loi; OG.chanSau = ''; ongCapNhat(); toast('Đã trả về kết quả máy khoanh'); };
+function ongDong(){ tubeDong(true); OG.img = null; OG.small = null; OG.ong = []; OG.phase = 'khoanh'; show('home'); }
+$('ongMoi').onclick = $('ongMoi2').onclick = ongDong;
+$('ongDem').onclick = ongDem;
+$('ongCham').onclick = () => { OG.chamXanh = !OG.chamXanh; ongCapNhat(); };
+$('ongSua').onclick = () => { OG.phase = 'khoanh'; OG.ngoaiOng = []; ongTool('ong'); ongCapNhat(); toast('Sửa vòng xong bấm "Đếm cọng từng ống" để đếm lại (các chấm đã sửa sẽ mất).', 4500); };
+$('ongCan').addEventListener('click', ev => { const b = ev.target.closest('button[data-id]'); if(b) tubeMo(parseInt(b.dataset.id)); });
+
+/* ---------- màn hình MỘT ỐNG: chấm từng cọng ---------- */
+const TD = { o: null, half: 0 }, tcv = $('tdCv'), tg = tcv.getContext('2d');
+function tubeMo(id){ const o = OG.ong.find(t => t.id === id); if(!o || !o.dots) return; TD.o = o; TD.half = Math.max(o.r, Math.min(o.r0 || o.r, OG.rOng)) * 1.3; $('tubeDlg').classList.remove('hidden'); $('tubeDlg').scrollTop = 0; tubeVe(); }
+function tubeDong(silent){ const o = TD.o; $('tubeDlg').classList.add('hidden'); TD.o = null; if(!silent && o && o.sua && !o.nguoi) toast(`Ống #${o.id}: đã sửa chấm nhưng CHƯA xác nhận – vẫn để VÀNG.`, 3500); if(!silent && OG.img) ongCapNhat(); }
+function tubeVe(){
+  const o = TD.o; if(!o) return; const S = tcv.width, h = TD.half, k = S / (2 * h), img = OG.img, q = tubeKq(o), n = tubeCount(o);
+  tg.setTransform(1, 0, 0, 1, 0, 0); tg.fillStyle = '#000'; tg.fillRect(0, 0, S, S); tg.imageSmoothingQuality = 'high';
+  const sx = Math.max(0, o.x - h), sy = Math.max(0, o.y - h), ex = Math.min(img.width, o.x + h), ey = Math.min(img.height, o.y + h);
+  if(ex > sx && ey > sy) tg.drawImage(img, sx, sy, ex - sx, ey - sy, (sx - o.x + h) * k, (sy - o.y + h) * k, (ex - sx) * k, (ey - sy) * k);
+  tg.save(); tg.fillStyle = 'rgba(0,0,0,.45)'; tg.beginPath(); tg.rect(0, 0, S, S); tg.moveTo(S / 2 + ongRIn(o) * k, S / 2); tg.arc(S / 2, S / 2, ongRIn(o) * k, 0, Math.PI * 2, true); tg.fill('evenodd'); tg.restore();   // làm tối phần ngoài ống
+  tg.lineWidth = 5; tg.strokeStyle = MAU_KQ[q]; if(o.co.length) tg.setLineDash([16, 10]); tg.beginPath(); tg.arc(S / 2, S / 2, o.r * k, 0, 7); tg.stroke(); tg.setLineDash([]);
+  const rr = Math.max(6, OG.head * .14 * k);
+  for(const d of o.dots) veCham(tg, d, (d.x - o.x + h) * k, (d.y - o.y + h) * k, rr, 2.5);
+  $('tdTitle').innerHTML = `Ống #${o.id} <span style="color:${q === 'vang' ? '#b98a00' : MAU_KQ[q]}">· ${TEN_KQ[q]}</span>` + (o.nguoi ? ' · anh đã soát' : '');
+  $('tdSub').textContent = `Máy đếm ${o.n.length} lần: ${o.n.join(' / ')} · cọng màu ${o.mau}` + (!o.them && o.n.every(v => v === 0) ? ' · trong vòng có vật nhưng máy không nhận ra cọng nào' : '') + (o.sua && !o.nguoi ? ' · đã sửa chấm, chưa xác nhận' : '') + (o.co.length ? ' · vòng bất thường: ' + o.co.map(c => c.split(' (')[0]).join(', ') : '');
+  $('tdCount').innerHTML = `<span id="tdN" style="color:${q === 'vang' ? '#b98a00' : MAU_KQ[q]}">${n}</span><small style="font-size:15px;color:var(--muted)">/${OG.cap}</small>`;
+  $('tdOk').textContent = `Xác nhận ống này ${n} cọng`;
+}
+tcv.addEventListener('click', ev => {
+  const o = TD.o; if(!o) return; const r = tcv.getBoundingClientRect(), k = (2 * TD.half) / r.width;
+  const p = { x: o.x - TD.half + (ev.clientX - r.left) * k, y: o.y - TD.half + (ev.clientY - r.top) * k };
+  let best = null, bd = OG.head * 0.5; for(const d of o.dots){ const dd = Math.hypot(d.x - p.x, d.y - p.y); if(dd < bd){ bd = dd; best = d; } }
+  if(best){
+    if(best.removed) best.removed = false;                                   // chạm lại chấm đã bỏ: lấy lại
+    else if(best.manual) o.dots.splice(o.dots.indexOf(best), 1);             // chấm tự thêm: xóa hẳn
+    else if(!dotOn(best)) best.confirmed = true;                             // chấm "nghi": tính
+    else best.removed = true;                                                // chấm đang tính: bỏ
+  }else{
+    if(Math.hypot(p.x - o.x, p.y - o.y) > ongRIn(o)){ toast('Chỗ này nằm ngoài vòng ống.'); return; }
+    o.dots.push({ x: p.x, y: p.y, w: OG.head, h: OG.head, s: 1, manual: true, st: 'sure' });
+  }
+  o.sua = true; o.nguoi = false; o.mau = ongMau(o); OG.saved = false; tubeVe();
+});
+function tubeKe(step){
+  const o = TD.o; if(!o) return; let L = OG.ong.filter(t => tubeKq(t) !== 'xanh' || t === o); if(L.length < 2) L = OG.ong;
+  const i = L.indexOf(o), nx = L[(i + step + L.length) % L.length]; if(nx) tubeMo(nx.id);
+}
+$('tdOk').onclick = () => { if(!TD.o) return; TD.o.nguoi = true; TD.o.sua = false; OG.saved = false; const n = tubeCount(TD.o), id = TD.o.id; tubeDong(); toast(`Đã xác nhận ống #${id}: ${n} cọng`); };
+$('tdMay').onclick = () => { const o = TD.o; if(!o) return; o.dots = o.dots.filter(d => !d.manual); o.dots.forEach(d => { d.removed = false; d.confirmed = false; }); o.nguoi = false; o.sua = false; o.mau = ongMau(o); tubeVe(); };
+$('tdPrev').onclick = () => tubeKe(-1); $('tdNext').onclick = () => tubeKe(1); $('tdClose').onclick = () => tubeDong();
+
+/* ---------- lưu, lịch sử, CSV ---------- */
+let ongLuuNhac = false;
+function ongEntry(){
+  const T = ongTong();
+  return { t: Date.now(), n: T.tong, pending: T.vang, mode: 'tube', cap: OG.cap, label: $('ongLabel').value.trim(), img: thumbOf(OG.img),
+    tubes: OG.ong.length, exp: OG.exp || '', xanh: T.xanh, 'do': T.do, vang: T.vang, ngoai: T.ngoai, chac: T.chac, chuaChac: T.chuaChac, mau: T.mauTxt,
+    nguoi: T.nguoi, batThuong: T.batThuong, dk: Math.round(OG.rOng * 2), ban: BAN_THU,
+    day: OG.ong.map(o => { const q = tubeKq(o); return o.id + ':' + (q === 'vang' && !o.nguoi ? o.n.join('/') : tubeCount(o)) + KY_KQ[q]; }).join(';'),
+    ong: OG.ong.map(o => ({ id: o.id, n: tubeCount(o), kq: tubeKq(o), m: o.n, mau: o.mau, ng: o.nguoi ? 1 : 0, bt: o.co.length ? o.co.map(c => c.split(' (')[0]).join(', ') : '' })) };
+}
+$('ongLuu').onclick = () => {
+  if(OG.phase !== 'ketqua') return; const T = ongTong();
+  if(OG.saved){ toast('Kết quả này đã lưu rồi.'); return; }
+  if(T.vang && !ongLuuNhac){ ongLuuNhac = true; toast(`Còn ${T.vang} ống VÀNG chưa soát. Bấm Lưu lần nữa nếu vẫn muốn lưu.`, 4500); return; }
+  ongLuuNhac = false; pushHistory([ongEntry()]); OG.saved = true; ongCapNhat();
+  toast(`Đã lưu: ${T.tong} cọng / ${OG.ong.length} ống (${T.xanh} xanh, ${T.do} đỏ, ${T.vang} vàng)`, 3500);
+};
+function taiCsv(rows, ten){
+  const csv = '﻿' + rows.map(r => r.map(v => '"' + String(v ?? '').replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = ten; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+$('btnCsvOng').onclick = () => {
+  const h = store.get('history', []).filter(e => e.mode === 'tube' && e.ong);
+  if(!h.length){ toast('Chưa có kết quả đếm theo ống nào trong lịch sử.'); return; }
+  const rows = [['Thời gian', 'Ghi chú', 'Ống số', 'Số cọng', 'Kết quả', 'Lần 1', 'Lần 2', 'Lần 3', 'Màu cọng', 'Nguồn', 'Vòng bất thường', 'Số chuẩn']];
+  for(const e of h) for(const o of e.ong) rows.push([new Date(e.t).toLocaleString('vi-VN'), e.label, o.id, o.n, TEN_KQ[o.kq], o.m[0] ?? '', o.m[1] ?? '', o.m[2] ?? '', o.mau, o.ng ? 'người soát' : 'máy', o.bt, e.cap]);
+  taiCsv(rows, 'dem_tinh_theo_ong_' + new Date().toISOString().slice(0, 10) + '.csv');
+};
+// ô nhập riêng của chế độ đếm theo ống
+function ongSyncHome(){ $('tubeRow').classList.toggle('hidden', MODE.m !== 'tube'); }
+document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', ongSyncHome)); ongSyncHome();
+window.__ong = () => ({ ban: BAN_THU, phase: OG.phase, k: OG.k, ngoai: OG.ngoai, gao: OG.gao, rOng: OG.rOng, head: OG.head, sharp: OG.sharp, tDem: OG.tDem, tKhoanh: OG.ms, luot: OG.luot, chan: OG.img ? ongKiem() : [],
+  tong: OG.phase === 'ketqua' ? ongTong() : null, ngoaiOng: OG.ngoaiOng.length, W: OG.img ? OG.img.width : 0, H: OG.img ? OG.img.height : 0,
+  ong: OG.ong.map(o => ({ id: o.id, x: o.x, y: o.y, r: o.r, co: o.co, n: o.n, c: o.dots ? tubeCount(o) : null, kq: o.dots ? tubeKq(o) : null, mau: o.mau, nguoi: !!o.nguoi, sua: !!o.sua, them: !!o.them,
+    dots: o.dots ? o.dots.map(d => ({ x: d.x, y: d.y, s: +d.s.toFixed(2), st: d.st, on: dotOn(d), removed: !!d.removed, manual: !!d.manual })) : null })),
+  td: TD.o ? { id: TD.o.id, half: TD.half } : null });
 /* Trang thử KHÔNG đăng ký service worker. Nếu máy đã cài app chính (sw v8 có lỗi lưu đè trang đang mở làm bản ngoại tuyến),
    trả lại bản ngoại tuyến của app chính từ bản đã lưu lúc cài ('./'). Không tạo bộ nhớ đệm mới. */
 async function traLaiNgoaiTuyen(){
